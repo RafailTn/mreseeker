@@ -16,13 +16,12 @@ all. This module computes them from the actual IntaRNA duplex instead - see
 `duplex_energy_steps`. Keeping one module means the training features and the
 inference features cannot diverge again.
 
-ONE OUTPUT MODE. The extractor writes DEFAULT_FEATURES - the featurewiz selection plus
-whatever new candidates are under test - and computes only those. The old
-`--all-features` superset mode is gone: featurewiz has already judged the superset, and
-from here on selection runs against DEFAULT_FEATURES instead, so the ~120 rejected
-features cost inference time and feed nothing. `--features-file` overrides the list, and
-`--list-features` prints the full vocabulary, so any rejected feature is still reachable
-by name (see the DEFAULT_FEATURES comment for why that escape hatch matters).
+ONE OUTPUT MODE, ONE FEATURE SET. The extractor writes DEFAULT_FEATURES - the 26
+features that survived selection, which is exactly what the shipped predictor consumes -
+and computes only those. There is no flag to request a different list: the alternative
+sets and the selection machinery that produced them live in the msc-thesis repository,
+where further feature work happens. The other extraction functions remain (the 26 are
+spread across every block, so the code is shared), but nothing here reaches them.
 
 Computation is GATED to the requested list: whole conservation windows, composition
 regions and the duplex-energy block are skipped when nothing asks for them. The gating is
@@ -40,9 +39,6 @@ Usage:
         --mirna-background data/mirna_background.tsv \
         --output train.csv
 
-    # reconsider a feature featurewiz rejected, or rebuild the old superset
-    python feature_extraction.py --list-features > superset.txt
-    python feature_extraction.py ... --features-file superset.txt
 """
 
 import os
@@ -75,62 +71,6 @@ except ImportError as _e:  # pragma: no cover
     ) from _e
 
 
-# ============================================================================
-# SELECTED FEATURES
-# ============================================================================
-#
-# The output of `feature_selection.py` - the intersection of the featurewiz selections
-# across the 5 folds. Current as of the rerun that followed the duplex-energy + phyloP
-# rewrite (commit "added selected features after rerun"), so the names here mean what
-# this module computes today. Mirrored in
-# feature_selection_featurewiz/selected_features.json.
-#
-# This list is the RECORD of what feature selection chose, not the list the extractor
-# writes - that is DEFAULT_FEATURES, which adds the candidates still under test. Keeping
-# them separate is what lets the training-side A/B hold the selection fixed, and what
-# tells the next featurewiz run which features it has already judged.
-#
-# To refresh: run featurewiz against a DEFAULT_FEATURES extraction, paste the survivors
-# here, and empty NEW_CANDIDATE_FEATURES of anything that was kept or dropped.
-
-SELECTED_FEATURES = [
-  "Eall",
-  "Eall1",
-  "binding_type_5mer.mismatch.3prime",
-  "binding_type_6mer.mismatch.3prime",
-  "central_max_consecutive_drop",
-  "consecutive_matches_minus_seed",
-  "conservation_range",
-  "conservation_variance",
-  "effective_3prime_matches",
-  "five_prime_flank_conservation_mean",
-  "gu_wobbles_in_seed_2_8_pos",
-  "mirna_3p_RYR_freq",
-  "mirna_3p_RYY_freq",
-  "mirna_3p_YRY_freq",
-  "mirna_3p_YYR_freq",
-  "mirna_3p_YYY_freq",
-  "mirna_3p_energy_asymmetry",
-  "mirna_3p_energy_gradient",
-  "mirna_3p_energy_mean",
-  "mirna_3p_energy_std",
-  "mirna_3p_ggg_count",
-  "mirna_seed_RRR_freq",
-  "mirna_seed_RRY_freq",
-  "mirna_seed_RYR_freq",
-  "mirna_seed_energy_asymmetry",
-  "mirna_seed_energy_gradient",
-  "mirna_seed_energy_mean",
-  "mre_5p_uuu_count",
-  "priority_score",
-  "seed_au_content",
-  "seed_conservation_mean",
-  "seed_conservation_min",
-  "seed_roughness",
-  "three_prime_flank_conservation_mean",
-  "total_gu_wobbles",
-  "total_matches"
-]
 
 
 # ============================================================================
@@ -1260,9 +1200,9 @@ def classify_binding_type_detailed(d):
 def all_feature_names() -> List[str]:
     """Every feature this module knows how to compute, in a stable order.
 
-    No longer what gets written by default - see DEFAULT_FEATURES. This is now the
-    *vocabulary*: it validates requested names, sizes the gating report, and is what
-    `--list-features` prints so a superset run remains one pipe away.
+    Not what gets written - that is DEFAULT_FEATURES, a 26-name subset of this. This is
+    the *vocabulary*: it validates the names in DEFAULT_FEATURES against what the module
+    can actually produce, and sizes the gating report.
     """
     return (INTARNA_ENERGY_FEATURES
             + SUBOPT_STAT_FEATURES
@@ -1273,63 +1213,52 @@ def all_feature_names() -> List[str]:
             + shuffle_zscore_feature_names())
 
 
-# Features added after the featurewiz run that produced SELECTED_FEATURES, so featurewiz
-# has never seen them and cannot have rejected them. Kept OUT of SELECTED_FEATURES on
-# purpose: that list is the record of what feature selection actually chose, and folding
-# these in would erase the distinction the next selection run needs.
+# THE feature set. This repository computes and trains on exactly these 26 columns -
+# the survivors of the featurewiz run against the earlier 56-feature extraction, and
+# exactly what the shipped models_gluon predictor takes as input.
 #
-# Derived rather than written out, so it cannot drift from the blocks it names.
+# Mirrored in data/selected_features_from56ft.json, which stays the traceable record of
+# the run that chose them. Kept as a literal here, not read from that JSON, so the
+# extractor has no runtime dependency on a path relative to the caller's cwd.
 #
-# `subopt_n_sites` is excluded: IntaRNA is run with `-n 10 --outDeltaE 100`, which always
-# fills the quota, so the column is constant at 10 on every row (measured) and can only
-# ever vary if those flags change.
-NEW_CANDIDATE_FEATURES = (
-    [c for c in SUBOPT_STAT_FEATURES if c != 'subopt_n_sites']
-    + [f'{r}_{k}' for r in _ENERGY_REGIONS for k in ('energy_sum', 'n_steps')]
-    + list(_ENERGY_CROSS_KEYS)
-    + list(_ZSCORE_KEYS)
-)
+# The alternative sets (the 36-feature `baseline`, the 56-feature `baseline+new`) and the
+# machinery for selecting between them live in the msc-thesis repository, where further
+# selection work happens. Here there is one set and no way to ask for another: every
+# other extraction function is still present, but nothing reaches it.
+SELECTED_26 = [
+    'E_bg_mean_mirna',
+    'E_bg_sd_mirna',
+    'E_hybrid_z_mirna',
+    'E_z_mirna',
+    'conservation_variance',
+    'duplex_energy_sum_total',
+    'effective_3prime_matches',
+    'five_prime_flank_conservation_mean',
+    'gu_wobbles_in_seed_2_8_pos',
+    'mirna_3p_energy_sum',
+    'mirna_seed_energy_gradient',
+    'mirna_seed_energy_mean',
+    'mirna_seed_energy_sum',
+    'priority_score',
+    'seed_au_content',
+    'seed_conservation_mean',
+    'seed_conservation_min',
+    'seed_vs_3p_energy_diff',
+    'subopt_E_delta_selected',
+    'subopt_frac_seedlike',
+    'subopt_n_distinct_starts',
+    'subopt_n_within_1kcal',
+    'subopt_priority_gap',
+    'subopt_target_span',
+    'three_prime_flank_conservation_mean',
+    'total_gu_wobbles',
+]
 
 
-# What the extractor writes, and computes, unless told otherwise.
-#
-# The full superset is no longer produced by default. featurewiz has already judged it
-# (commit "added selected features after rerun"), and from here on selection runs against
-# this list instead: the survivors plus whatever new candidates are under test. So the
-# ~120 features it rejected are no longer computed, which is the whole point - they cost
-# time at inference and nothing consumes them.
-#
-# THE ONE THING TO KNOW. featurewiz's rejections were conditional on the set it saw: a
-# feature dropped because a correlated competitor beat it may be the better choice once
-# that competitor is gone. So this is a ratchet - but a soft one, deliberately. Every
-# extraction function is still here and every name is still in all_feature_names(), so any
-# rejected feature can be brought back by name:
-#
-#     python feature_extraction.py --list-features > superset.txt
-#     python feature_extraction.py ... --features-file superset.txt
-#
-# Promote a candidate into SELECTED_FEATURES (and drop it from NEW_CANDIDATE_FEATURES)
-# only after a featurewiz run has actually kept it.
-DEFAULT_FEATURES = list(SELECTED_FEATURES) + list(NEW_CANDIDATE_FEATURES)
-
-
-# Named column sets for the training-side A/B, resolved against a default-mode CSV.
-# `None` means "every feature column present in the CSV" - which is now DEFAULT_FEATURES,
-# so 'all' and 'baseline+new' select the same columns unless you extracted with an
-# explicit --features-file. 'baseline' is still the strict subset featurewiz chose, which
-# is what makes the A/B meaningful.
-FEATURE_SETS = {
-    'baseline': lambda: list(SELECTED_FEATURES),
-    'baseline+new': lambda: list(SELECTED_FEATURES) + list(NEW_CANDIDATE_FEATURES),
-    'all': lambda: None,
-}
-
-
-def feature_set(name: str) -> Optional[List[str]]:
-    """Resolve a FEATURE_SETS name to its column list (None = keep everything)."""
-    if name not in FEATURE_SETS:
-        raise KeyError(f"unknown feature set {name!r}; have {sorted(FEATURE_SETS)}")
-    return FEATURE_SETS[name]()
+# What the extractor writes and computes. There is no alternative and no flag to request
+# one: extraction, training and inference all resolve to this single list, which is what
+# keeps them from diverging.
+DEFAULT_FEATURES = list(SELECTED_26)
 
 
 # Identifier / passthrough columns, written in both modes. `energy_source` rides along so
@@ -1485,29 +1414,14 @@ def _check_subopt_columns(intarna_results):
 def main():
     parser = argparse.ArgumentParser(
         description='Extract features for miRNA-MRE pairs from an IntaRNA duplex. '
-                    'Writes and computes DEFAULT_FEATURES (the featurewiz selection plus '
-                    'the candidates under test) unless --features-file says otherwise.')
-    # --list-features exits before anything else is read, so the required arguments below
-    # must not be enforced for it.
-    if '--list-features' in sys.argv:
-        for name in all_feature_names():
-            print(name)
-        return 0
-
+                    'Writes and computes the 26 features in DEFAULT_FEATURES - the only '
+                    'set this repository produces.')
     parser.add_argument('--intarna', required=True, help='best_intarna results TSV')
     parser.add_argument('--mre-fasta', required=True)
     parser.add_argument('--mirna-fasta', required=True)
     parser.add_argument('--v7', required=True,
                         help='v7 TSV: conservation vector, family, label, coordinates')
     parser.add_argument('--output', required=True)
-    parser.add_argument('--list-features', action='store_true',
-                        help='print every computable feature name, one per line, and exit. '
-                             'Pipe into a file and pass it back with --features-file to '
-                             'reproduce the old --all-features superset.')
-    parser.add_argument('--features-file', default=None,
-                        help='JSON/newline list of features to write, overriding '
-                             'DEFAULT_FEATURES (e.g. a fresh feature_selection.py run, or '
-                             'the --list-features superset)')
     parser.add_argument('--cons-col', default=DEFAULT_CONS_COL,
                         help=f'conservation column in the v7 TSV (default {DEFAULT_CONS_COL})')
     parser.add_argument('--cons-no-reverse', action='store_true',
@@ -1629,15 +1543,8 @@ def main():
 
     # Which feature columns to write. Resolved BEFORE the compute loop, because it is
     # also what the loop is allowed to skip computing (see _resolve_wanted).
-    if args.features_file:
-        text = open(args.features_file).read()
-        features = (json.loads(text) if text.lstrip().startswith('[')
-                    else [ln.strip() for ln in text.splitlines() if ln.strip()])
-        source = args.features_file
-    else:
-        features = list(DEFAULT_FEATURES)
-        source = (f"DEFAULT_FEATURES ({len(SELECTED_FEATURES)} selected + "
-                  f"{len(NEW_CANDIDATE_FEATURES)} candidates)")
+    features = list(DEFAULT_FEATURES)
+    source = f"DEFAULT_FEATURES ({len(SELECTED_26)} selected)"
 
     # binding_type is one-hot encoded at selection time, so the list can contain
     # `binding_type_<value>` columns that no computation produces.
@@ -1647,8 +1554,8 @@ def main():
     known = set(all_feature_names())
     unknown = [c for c in features if c not in known]
     if unknown:
-        sys.exit(f"ERROR: {len(unknown)} requested feature(s) are not produced by this "
-                 f"extractor: {unknown}\nRun --list-features to see the full vocabulary.")
+        sys.exit(f"ERROR: {len(unknown)} feature(s) in DEFAULT_FEATURES are not produced "
+                 f"by this extractor: {unknown}")
 
     # Restrict computation to what will actually be written. --no-feature-gating computes
     # everything anyway, which is the reference the gating is verified against.
@@ -1698,9 +1605,8 @@ def main():
                 row[col] = 1 if btype == col[len('binding_type_'):] else 0
             writer.writerow(row)
 
-    mode = "from " + ("--features-file" if args.features_file else "DEFAULT_FEATURES")
     print(f"Done. Wrote {len(sites)} rows, {len(features) + len(binding_type_cols)} "
-          f"features ({mode}).")
+          f"features (from DEFAULT_FEATURES).")
 
     # Pairs for which the ensemble run found no interaction at all, so the partition-
     # function energies are NaN. Keyed on chimeric_sequence so the set can be joined

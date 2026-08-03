@@ -14,12 +14,17 @@ from sklearn.metrics import average_precision_score
 from sklearn.model_selection import GroupShuffleSplit
 from typing import List, Optional, Dict, Tuple
 
-# Shared with gluon_training_kfold.py so a model compared under one feature-set
-# definition and retrained under another cannot silently be a different experiment.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from feature_sets import (  # noqa: E402
-    FEATURE_SETS, feature_set, select_feature_columns, COLS2DROP, SEQUENCE_COLS,
-)
+# The feature list lives with the extractor that computes the columns, so the names
+# cannot drift from what is actually produced. SELECTED_26 is the only set this
+# repository trains on - see src/gluon/feature_extraction.py.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'gluon'))
+from feature_extraction import SELECTED_26  # noqa: E402
+
+# Identifier columns preserved alongside the reduced frame for error analysis.
+SEQUENCE_COLS = [
+    'chimeric_sequence', 'mre_sequence', 'mirna_sequence',
+    'target_id', 'query_id', 'mir_fam',
+]
 
 def evaluate_df(df: pd.DataFrame, predictor: TabularPredictor) -> Tuple[dict, float]:
     """Evaluate a dataframe and return metrics including average precision score."""
@@ -31,28 +36,32 @@ def evaluate_df(df: pd.DataFrame, predictor: TabularPredictor) -> Tuple[dict, fl
 
 def preprocess_dataframe(
     df: pd.DataFrame,
-    cols2drop: List[str],
     sequence_cols: List[str],
-    features: Optional[List[str]] = None,
+    features: List[str],
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Preprocess dataframe: drop duplicates, drop columns, preserve sequences.
+    Preprocess dataframe: drop duplicates, reduce to `features`, preserve sequences.
 
-    `features` None keeps every column except cols2drop; a list selects exactly those.
+    `mir_fam` and `label` ride along through the reduction: the first is the CV/tuning
+    grouping key and the basis of the sample weights (the caller drops it once the split
+    is made), the second is the target.
 
     Returns:
         Tuple of (processed_df, df_with_sequences)
     """
     df = df.drop_duplicates(subset=['chimeric_sequence'], keep=False)
-    # Preserve sequences BEFORE dropping columns
+    # Preserve sequences BEFORE reducing columns
     available_seq_cols = [c for c in sequence_cols if c in df.columns]
     df_with_sequences = df[available_seq_cols + ['label']].copy()
-    if features is not None:
-        df = select_feature_columns(df, features)
-    else:
-        # Drop columns that exist in the dataframe
-        cols_to_drop = [c for c in cols2drop if c in df.columns]
-        df = df.drop(columns=cols_to_drop)
+    missing = [c for c in features if c not in df.columns]
+    if missing:
+        raise SystemExit(
+            f"ERROR: {len(missing)} feature(s) are not in the CSV: "
+            f"{missing[:10]}{' ...' if len(missing) > 10 else ''}\n"
+            f"Regenerate it with feature_extraction.py (and, for the shuffle z-scores, "
+            f"--mirna-background)."
+        )
+    df = df[features + [c for c in ('mir_fam', 'label') if c in df.columns]].copy()
     family_counts = df['mir_fam'].value_counts().clip(lower=100)
     total_samples = len(df) 
     # Weight = Total / (n_families * count_of_this_family)
@@ -153,32 +162,17 @@ def main(
     time_limit: int,
     misclassified_output_dir: str,
     results_output_path: str,
-    feature_set_name: str = 'all',
-    features_json: str = None,
 ):
     print("Starting Training...")
 
-    if features_json is not None:
-        # Train on exactly the list a feature_selection.py run wrote, without first
-        # promoting it into SELECTED_FEATURES. The JSON path is the traceable record of
-        # what this model saw - keep it beside the results.
-        with open(features_json) as fh:
-            features = json.load(fh)
-        print(f"Feature set: {features_json} ({len(features)} features from JSON)")
-    else:
-        features = feature_set(feature_set_name)
-        print(f"Feature set: {feature_set_name} "
-              f"({'all columns present' if features is None else str(len(features)) + ' features'})")
+    features = list(SELECTED_26)
+    print(f"Feature set: SELECTED_26 ({len(features)} features)")
 
-    # Shared with gluon_training_kfold. This script's own copy used to omit
-    # `energy_source`, which feature_extraction writes as an identifier and which would
-    # therefore have reached AutoGluon as a categorical feature.
-    cols2drop = COLS2DROP
     sequence_cols = SEQUENCE_COLS
 
     # Load and preprocess training data
     df_raw = pd.read_csv(train_df_path)
-    df, df_with_sequences = preprocess_dataframe(df_raw, cols2drop, sequence_cols, features)
+    df, df_with_sequences = preprocess_dataframe(df_raw, sequence_cols, features)
 
     # GroupShuffleSplit: 10% tuning set, groups by mir_fam
     gss = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=42)
@@ -201,13 +195,13 @@ def main(
     # Load and preprocess test data
     final_test_raw = pd.read_csv(test_df_path)
     final_test_data, final_test_with_seq = preprocess_dataframe(
-        final_test_raw, cols2drop, sequence_cols, features
+        final_test_raw, sequence_cols, features
     )
     final_test_data = final_test_data.drop(columns=['mir_fam'], errors='ignore')
 
     final_final_test_raw = pd.read_csv(leftout_df_path)
     final_final_test_data, final_final_test_with_seq = preprocess_dataframe(
-        final_final_test_raw, cols2drop, sequence_cols, features
+        final_final_test_raw, sequence_cols, features
     )
     final_final_test_data = final_final_test_data.drop(columns=['mir_fam'], errors='ignore')
 
@@ -280,16 +274,6 @@ if __name__ == "__main__":
     parser.add_argument('--results_path', type=str,
                         default='results/gluon_total_results.txt',
                         help='Path to save evaluation results')
-    parser.add_argument('--feature-set', type=str, default='all',
-                        choices=sorted(FEATURE_SETS),
-                        help="Which columns to train on. Use the set that won the k-fold "
-                             "A/B, otherwise the final model is not the model you "
-                             "compared. Defined in src/feature_extraction.FEATURE_SETS.")
-    parser.add_argument('--features-json', type=str, default=None,
-                        help="Train on exactly the list in this JSON file (a "
-                             "feature_selection.py --output). Overrides --feature-set, so "
-                             "you can try a fresh selection without editing "
-                             "SELECTED_FEATURES first.")
 
     args = parser.parse_args()
 
@@ -305,6 +289,4 @@ if __name__ == "__main__":
         time_limit=args.time,
         misclassified_output_dir=args.misclassified_dir,
         results_output_path=args.results_path,
-        feature_set_name=args.feature_set,
-        features_json=args.features_json,
     )

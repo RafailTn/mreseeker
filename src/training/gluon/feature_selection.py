@@ -2,23 +2,27 @@
 """
 Featurewiz feature selection over whatever the extractor wrote.
 
-RUNS IN ITS OWN ENVIRONMENT, not the pixi env: featurewiz pins dependencies that
-conflict with the rest of the pipeline. Hence this script only ever reads and writes
-CSV/JSON - it imports nothing from src/, so it needs neither IntaRNA nor ViennaRNA.
-Its dependencies are just featurewiz, polars, pandas, numpy and scikit-learn.
+RUNS IN ITS OWN ENVIRONMENT (dependencies/featurewiz), not the gluon one: featurewiz
+0.6.1 pins xgboost <=1.7.6 while autogluon.tabular 1.4.0 needs >=2.0, so no single
+solve holds both. Hence this script only ever reads and writes CSV/JSON - it imports
+nothing from src/, so it needs neither IntaRNA nor ViennaRNA. Its dependencies are
+just featurewiz, polars, pandas, numpy and scikit-learn.
 
-Input:  a src/feature_extraction.py output (train/test/leftout). That is now
-        DEFAULT_FEATURES - the previous selection plus the candidates under test - not
-        the old `--all-features` superset, which no longer exists. Selection therefore
-        narrows an already-narrowed set; to reconsider a feature dropped by an earlier
-        run, extract with `--list-features > superset.txt` and `--features-file
-        superset.txt` first.
-Output: the features selected in *every* fold, written to --output as a JSON list
-        that `feature_extraction.py --features-file` reads back directly. Paste the
-        same list into SELECTED_FEATURES, and empty NEW_CANDIDATE_FEATURES of whatever
-        this run has now judged.
+Input:  a src/gluon/feature_extraction.py output (train/test/leftout).
 
-    python feature_selection_featurewiz/feature_selection.py \
+        NOTE - the whole caveat for running this here. Extraction in this repository
+        writes exactly SELECTED_26, the survivors of the run that produced the shipped
+        model. A selection against a default extraction therefore sees only the 26 it
+        already chose: it can narrow them further, but it cannot promote or resurrect
+        anything, because nothing else is ever computed. The wider candidate sets and
+        the machinery for judging them live in the msc-thesis repository, which is
+        where new feature work belongs.
+Output: the features selected in *every* fold, written to --output as a JSON list.
+        To adopt a result, replace SELECTED_26 in src/gluon/feature_extraction.py with
+        it - that constant is the single definition extraction, training and inference
+        all resolve to.
+
+    python src/training/gluon/feature_selection.py \
         --train   data/manakov_train_all.csv \
         --test    data/manakov_test_all.csv \
         --leftout data/manakov_leftout_all.csv \
@@ -166,8 +170,8 @@ def main():
     with open(args.output, 'w') as f:
         json.dump(common, f, indent=2)
     print(f"\nWrote {len(common)} selected features to {args.output}")
-    print("Paste this list into SELECTED_FEATURES in src/feature_extraction.py to "
-          "make it the default.")
+    print("To adopt it, replace SELECTED_26 in src/gluon/feature_extraction.py with "
+          "this list - extraction, training and inference all resolve to that constant.")
 
 
 if __name__ == '__main__':

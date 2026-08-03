@@ -14,12 +14,17 @@ from sklearn.metrics import fbeta_score, average_precision_score
 from sklearn.model_selection import GroupShuffleSplit, StratifiedGroupKFold, StratifiedKFold
 from typing import List, Optional, Dict, Tuple
 
-# Shared with gluon_train_total.py so the two entry points cannot disagree about what a
-# named feature set means; the definitions themselves live in src/feature_extraction.py.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from feature_sets import (  # noqa: E402
-    FEATURE_SETS, feature_set, select_feature_columns, COLS2DROP, SEQUENCE_COLS,
-)
+# The feature list lives with the extractor that computes the columns, so the names
+# cannot drift from what is actually produced. SELECTED_26 is the only set this
+# repository trains on - see src/gluon/feature_extraction.py.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'gluon'))
+from feature_extraction import SELECTED_26  # noqa: E402
+
+# Identifier columns preserved alongside the reduced frame for error analysis.
+SEQUENCE_COLS = [
+    'chimeric_sequence', 'mre_sequence', 'mirna_sequence',
+    'target_id', 'query_id', 'mir_fam',
+]
 
 
 def get_misclassified(
@@ -237,29 +242,32 @@ def write_metric_means(
 
 def preprocess_dataframe(
     df: pd.DataFrame,
-    cols2drop: List[str],
     sequence_cols: List[str],
-    features: Optional[List[str]] = None,
+    features: List[str],
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Preprocess dataframe: drop duplicates, drop columns, preserve sequences.
+    Preprocess dataframe: drop duplicates, reduce to `features`, preserve sequences.
 
-    `features` None keeps every column except cols2drop (the historical behaviour);
-    a list selects exactly those instead.
+    `mir_fam` and `label` ride along through the reduction: the first is the CV/tuning
+    grouping key and the basis of the sample weights (the caller drops it once the split
+    is made), the second is the target.
 
     Returns:
         Tuple of (processed_df, df_with_sequences)
     """
     df = df.drop_duplicates(subset=['chimeric_sequence'], keep=False)
-    # Preserve sequences BEFORE dropping columns
+    # Preserve sequences BEFORE reducing columns
     available_seq_cols = [c for c in sequence_cols if c in df.columns]
     df_with_sequences = df[available_seq_cols + ['label']].copy()
-    if features is not None:
-        df = select_feature_columns(df, features)
-    else:
-        # Drop columns that exist in the dataframe
-        cols_to_drop = [c for c in cols2drop if c in df.columns]
-        df = df.drop(columns=cols_to_drop)
+    missing = [c for c in features if c not in df.columns]
+    if missing:
+        raise SystemExit(
+            f"ERROR: {len(missing)} feature(s) are not in the CSV: "
+            f"{missing[:10]}{' ...' if len(missing) > 10 else ''}\n"
+            f"Regenerate it with feature_extraction.py (and, for the shuffle z-scores, "
+            f"--mirna-background)."
+        )
+    df = df[features + [c for c in ('mir_fam', 'label') if c in df.columns]].copy()
     family_counts = df['mir_fam'].value_counts().clip(lower=100)
     total_samples = len(df)
     # Weight = Total / (n_families * count_of_this_family)
@@ -281,40 +289,29 @@ def main(
     misclassified_output_dir: str,
     results_output_path: str,
     n_folds: int = 5,
-    feature_set_name: str = 'all',
-    features_json: str = None,
 ):
     print("Starting Training...")
 
-    if features_json is not None:
-        # A/B a fresh feature_selection.py list without first promoting it into
-        # SELECTED_FEATURES. The JSON path is the traceable record of what was compared.
-        with open(features_json) as fh:
-            features = json.load(fh)
-        print(f"Feature set: {features_json} ({len(features)} features from JSON)")
-    else:
-        features = feature_set(feature_set_name)
-        print(f"Feature set: {feature_set_name} "
-              f"({'all columns present' if features is None else str(len(features)) + ' features'})")
+    features = list(SELECTED_26)
+    print(f"Feature set: SELECTED_26 ({len(features)} features)")
 
-    cols2drop = COLS2DROP
     # Sequence columns to preserve for misclassification analysis
     sequence_cols = SEQUENCE_COLS
 
     # Load and preprocess training data
     df_raw = pd.read_csv(train_df_path)
-    df, df_with_sequences = preprocess_dataframe(df_raw, cols2drop, sequence_cols, features)
+    df, df_with_sequences = preprocess_dataframe(df_raw, sequence_cols, features)
     df_pl = pl.from_pandas(df)
 
     # Load and preprocess test data
     final_test_raw = pd.read_csv(test_df_path)
     final_test_data, final_test_with_seq = preprocess_dataframe(
-        final_test_raw, cols2drop, sequence_cols, features
+        final_test_raw, sequence_cols, features
     )
 
     final_final_test_raw = pd.read_csv(leftout_df_path)
     final_final_test_data, final_final_test_with_seq = preprocess_dataframe(
-        final_final_test_raw, cols2drop, sequence_cols, features
+        final_final_test_raw, sequence_cols, features
     )
     # Setup cross-validation
     sgkf = StratifiedGroupKFold(n_splits=n_folds, shuffle=True, random_state=42)
@@ -456,19 +453,6 @@ if __name__ == "__main__":
     parser.add_argument('--results_path', type=str,
                         default='results/gluon_kfold_results.txt',
                         help='Path to save evaluation results')
-    parser.add_argument('--feature-set', type=str, default='all',
-                        choices=sorted(FEATURE_SETS),
-                        help="Which columns to train on. 'all' (default) keeps every "
-                             "column in the CSV except cols2drop; 'baseline' is the "
-                             "featurewiz selection alone; 'baseline+new' adds the "
-                             "candidates featurewiz has not yet judged. With a "
-                             "default-mode CSV 'all' and 'baseline+new' coincide. "
-                             "Defined in src/feature_extraction.FEATURE_SETS.")
-    parser.add_argument('--features-json', type=str, default=None,
-                        help="Cross-validate on exactly the list in this JSON file (a "
-                             "feature_selection.py --output). Overrides --feature-set, so "
-                             "you can A/B a fresh selection without editing "
-                             "SELECTED_FEATURES first.")
 
     args = parser.parse_args()
 
@@ -485,6 +469,4 @@ if __name__ == "__main__":
         misclassified_output_dir=args.misclassified_dir,
         results_output_path=args.results_path,
         n_folds=args.folds,
-        feature_set_name=args.feature_set,
-        features_json=args.features_json,
     )
