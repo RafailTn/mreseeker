@@ -14,6 +14,7 @@ __pycache__/
 # --ckpt-dir; the one shipped checkpoint stays tracked.
 *.pt
 !cnn_checkpoints/cnn_branches_mirbind_embed16_restruct.pt
+models_gluon/
 
 # ── Run artefacts ─────────────────────────────────────────────────────────
 *.db
@@ -26,7 +27,6 @@ best_hparams_mirbind.json
 # ── Data ──────────────────────────────────────────────────────────────────
 # The v7 interaction tables run to several GB, so data/ is ignored by
 # default; the small background files are tracked explicitly.
-data/*
 !data/mirna_background.fa
 !data/mirna_background.tsv
 

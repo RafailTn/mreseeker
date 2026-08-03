@@ -15,7 +15,7 @@ import pandas as pd
 
 # The set definitions live with the extractor that computes the columns, so the names
 # cannot drift from what is actually produced.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'gluon'))
 from feature_extraction import FEATURE_SETS, feature_set  # noqa: E402,F401
 
 

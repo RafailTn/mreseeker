@@ -1,0 +1,27 @@
+# Environment for src/training/gluon/feature_selection.py only.
+#
+# featurewiz cannot share the gluon env: featurewiz 0.6.1 pins
+# xgboost >=1.6.2,<=1.7.6, while autogluon.tabular 1.4.0 requires
+# xgboost >=2.0,<3.1.  The ranges are disjoint, so no single solve exists.
+# Feature selection is an offline step whose only output is a JSON list of
+# column names (e.g. data/selected_features_from56ft.json), which the training
+# scripts then read via --features-json — so the two never need to run in the
+# same interpreter.
+#
+#   pixi run -m dependencies/featurewiz python src/training/gluon/feature_selection.py ...
+[workspace]
+channels = ["conda-forge"]
+name = "featurewiz"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+# featurewiz 0.6.1 resolves against scikit-learn 1.5.2 / xgboost 1.7.6, which
+# in turn need an older Python than the gluon env's 3.12.
+python = ">=3.11, <3.12"
+polars = ">=1.38.1,<2"
+
+[pypi-dependencies]
+featurewiz = ">=0.6.1, <0.7"

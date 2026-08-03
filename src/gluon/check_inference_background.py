@@ -114,7 +114,11 @@ def append_background_rows(path: str, new_rows: list):
 
     rows = sorted(existing.values(), key=lambda r: r['mirna_sequence'])
     with open(path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=BACKGROUND_COLS, delimiter='\t')
+        # csv's default dialect terminates rows with \r\n, which would rewrite every
+        # line of the table on an append-only extension. Keep it LF so the diff is
+        # just the new rows.
+        writer = csv.DictWriter(f, fieldnames=BACKGROUND_COLS, delimiter='\t',
+                                lineterminator='\n')
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
