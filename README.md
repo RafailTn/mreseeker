@@ -81,6 +81,14 @@ pixi run --manifest-path dependencies/gluon/pixi.toml python3 src/gluon/predict_
 
 Output is a TSV with `interaction_probability` and a thresholded `prediction`.
 
+Scoring defaults to the single bagged LightGBM (`LightGBMLarge_BAG_L1`) rather than the
+stacked weighted ensemble: it is ~10x faster at inference, far more tractable to
+explain, and performs near-identically — 0.8443 vs 0.8465 APS on the Manakov v7 test
+set, 0.8388 vs 0.8403 on leftout. The full stack is still in `models_gluon` — pass
+`model="WeightedEnsemble_L3"` to `predict_proba` to use it. `models_gluon_lgbm` is a
+138 MB deployment clone of just the default model, with bit-identical output to the
+full 6.8 GB directory.
+
 **The two FASTAs are paired positionally, not all-vs-all** — record *i* of
 `-target_fasta` is scored against record *i* of `-query_fasta`. `make_fastas.py`
 is the supported way to produce a row-aligned pair from a source table:

@@ -62,20 +62,102 @@ def _drop_non_numeric(df: pd.DataFrame) -> pd.DataFrame:
     return df.select_dtypes(include=[np.number])
 
 
+def _positive_class_shap(vals) -> np.ndarray:
+    """
+    Flatten shap's per-version output into (n_samples, n_features).
+
+    Binary LightGBM has been returned as a bare array, as a 2-element list, and as a
+    trailing-axis-2 array across shap releases, so normalise rather than assume.
+    """
+    if isinstance(vals, list):
+        vals = vals[1] if len(vals) == 2 else vals[0]
+    vals = np.asarray(vals)
+    if vals.ndim == 3:
+        vals = vals[..., 1] if vals.shape[-1] == 2 else vals[..., 0]
+    return vals
+
+
+def _lightgbm_boosters(predictor: TabularPredictor) -> list | None:
+    """
+    The raw LightGBM Boosters behind the predictor's default model, or None.
+
+    Returns None for anything that is not pure LightGBM - a stacked ensemble mixing in
+    neural nets has no tree structure to walk, and must fall back to KernelExplainer.
+    A bagged model contributes one Booster per fold.
+    """
+    try:
+        import lightgbm as lgb
+    except ImportError:
+        return None
+
+    model = predictor._trainer.load_model(predictor.model_best)
+    if hasattr(model, "models") and hasattr(model, "load_child"):
+        children = [getattr(model.load_child(c), "model", None) for c in model.models]
+    else:
+        children = [getattr(model, "model", None)]
+
+    if not children or not all(isinstance(c, lgb.Booster) for c in children):
+        return None
+
+    # Averaging fold SHAP values is only valid if the folds agree on column order.
+    names = children[0].feature_name()
+    if any(c.feature_name() != names for c in children):
+        return None
+    return children
+
+
+def compute_tree_shap(
+    predictor: TabularPredictor,
+    boosters: list,
+    X_explain: pd.DataFrame,
+) -> tuple[np.ndarray, float, list[str]]:
+    """
+    Exact SHAP values via TreeSHAP, in LOG-ODDS space.
+
+    TreeSHAP walks the trees directly instead of sampling coalitions, so the values are
+    exact rather than approximated - there is no nsamples knob and no background set to
+    choose. Because SHAP is linear in the model output, averaging the per-fold values
+    reproduces the bagged model exactly rather than approximating it.
+
+    Note the units: LightGBM's binary objective is fit in log-odds, so contributions sum
+    to the raw margin, not to the probability. The bag averages probabilities, so
+    sigmoid(sum(shap) + baseline) is close to but not identical to the reported
+    interaction_probability. Signs and rankings are unaffected.
+    """
+    import shap
+
+    X_model = predictor.transform_features(X_explain)
+    names = list(boosters[0].feature_name())
+
+    print(f"Computing TreeSHAP for {len(X_explain)} samples "
+          f"across {len(boosters)} bagged fold(s) ...")
+    fold_vals, fold_base = [], []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for booster in boosters:
+            explainer = shap.TreeExplainer(booster)
+            fold_vals.append(_positive_class_shap(explainer.shap_values(X_model[names])))
+            fold_base.append(float(np.mean(explainer.expected_value)))
+
+    return np.mean(fold_vals, axis=0), float(np.mean(fold_base)), names
+
+
 def compute_shap(
     predictor: TabularPredictor,
     X_background: pd.DataFrame,
     X_explain: pd.DataFrame,
     n_background_clusters: int = 25,
     nsamples: int = 200,
-) -> tuple[np.ndarray, float]:
+) -> tuple[np.ndarray, float, list[str]]:
     """
-    SHAP values via KernelExplainer - fully model-agnostic.
+    SHAP values via KernelExplainer - fully model-agnostic, approximate, PROBABILITY
+    space. Used only when the model is not pure LightGBM; see compute_tree_shap.
 
     Returns
     -------
     shap_values : np.ndarray  shape (n_explain_samples, n_features)
     baseline : float expected model output over background (E[f(x)])
+    feature_names : the columns the values are aligned to
     """
     import shap
 
@@ -96,7 +178,8 @@ def compute_shap(
         warnings.simplefilter("ignore")
         shap_values = explainer.shap_values(X_explain, nsamples=nsamples, silent=True)
 
-    return np.array(shap_values), float(explainer.expected_value)
+    return (np.array(shap_values), float(explainer.expected_value),
+            list(X_explain.columns))
 
 
 def build_explanation_outputs(
@@ -127,6 +210,12 @@ def build_explanation_outputs(
        The sign of each SHAP value tells you the direction of the feature's
        effect: positive pushes toward interaction, negative pushes away.
 
+       Units depend on which explainer ran. For a LightGBM model this is TreeSHAP and
+       the values are exact, in LOG-ODDS. For anything else it falls back to the
+       approximate KernelExplainer, whose values are in probability. Both are written
+       to the same columns, so note which model produced a given file before comparing
+       magnitudes across runs.
+
     Returns
     -------
     per_sample_cols : dict mapping column names to lists, aligned to the full
@@ -151,13 +240,26 @@ def build_explanation_outputs(
     else:
         X_explain = X_pos
 
-    shap_vals, baseline = compute_shap(
-        predictor,
-        X_background = X_numeric,
-        X_explain = X_explain,
-        n_background_clusters = n_background_clusters,
-        nsamples = nsamples_per_shap,
-    )
+    # TreeSHAP where the model allows it - exact, ~20x faster per row, and it needs no
+    # background set. Anything that is not pure LightGBM has no trees to walk and falls
+    # back to the sampling explainer.
+    boosters = _lightgbm_boosters(predictor)
+    if boosters:
+        shap_vals, baseline, feat_cols = compute_tree_shap(
+            predictor, boosters, X_explain,
+        )
+        units = "log-odds"
+    else:
+        print(f"{predictor.model_best} is not a LightGBM model - "
+              f"falling back to KernelExplainer.")
+        shap_vals, baseline, feat_cols = compute_shap(
+            predictor,
+            X_background = X_numeric,
+            X_explain = X_explain,
+            n_background_clusters = n_background_clusters,
+            nsamples = nsamples_per_shap,
+        )
+        units = "probability"
 
     shap_df = pd.DataFrame(shap_vals, columns=feat_cols)
 
@@ -170,7 +272,7 @@ def build_explanation_outputs(
     global_path = Path(str(out_stem) + "_global_importance.tsv")
     global_tbl.to_csv(global_path, sep="\t", index=False, float_format="%.6f")
     print(f"\n  Global importance -> {global_path}")
-    print("Top 5 features (by mean |SHAP|):")
+    print(f"Top 5 features (by mean |SHAP|, {units}):")
     for _, row in global_tbl.head(5).iterrows():
         print(f"{row['feature']:45s}  "
               f"SHAP={row['mean_abs_shap']:.4f} (rank {row['shap_rank']:>3})")
@@ -193,10 +295,11 @@ def build_explanation_outputs(
             per_sample_top[f"top{k}_feature"].append("")
             per_sample_top[f"top{k}_shap"].append(0.0)
 
-    proba_pos = pos_proba[pos_mask.values].reset_index(drop=True)
-    if len(proba_pos) > max_shap_samples:
-        proba_pos = proba_pos.sample(
-            n=max_shap_samples, random_state=42).reset_index(drop=True)
+    # Index by X_explain's own labels rather than re-drawing a sample: an independent
+    # .sample() call only lines up as long as the seed, length and pandas version all
+    # agree, and a silent mismatch would pair each row's probability with another row's
+    # drivers.
+    proba_pos = pos_proba[pos_mask.values].reset_index(drop=True).loc[X_explain.index]
 
     per_sample_df = pd.DataFrame(
         {"interaction_probability": proba_pos.values,
@@ -207,8 +310,8 @@ def build_explanation_outputs(
     per_sample_df.to_csv(per_sample_path, sep="\t", index_label="row_index",
                          float_format="%.6f")
     print(f"Per-sample SHAP  -> {per_sample_path}")
-    print(f"Baseline E[f(x)] = {baseline:.4f}  "
-          f"(model output if all features are at their background mean)")
+    print(f"Baseline E[f(x)] = {baseline:.4f} ({units})  "
+          f"(model output with no feature contributions)")
 
     # -- Align to full output length (non-positives get empty / None) ----------
     n_total = len(binary_labels)
@@ -219,8 +322,12 @@ def build_explanation_outputs(
         {f"top{k}_shap": [None] * n_total for k in range(1, top_n + 1)}
     )
 
+    # X_explain is a RANDOM sample of the positives, so the explained rows are not the
+    # first max_shap_samples of them. X_explain.index holds each explained row's position
+    # within X_pos, which pos_indices maps back to its row in the full input; taking a
+    # leading slice instead would attach every row's drivers to the wrong row.
     pos_indices = [i for i, v in enumerate(pos_mask.values) if v]
-    sampled_pos = pos_indices[:max_shap_samples]
+    sampled_pos = [pos_indices[j] for j in X_explain.index]
 
     for shap_i, orig_i in enumerate(sampled_pos):
         if shap_i >= len(shap_df):
@@ -285,7 +392,9 @@ def main() -> int:
                         help="Compute feature importance + SHAP explanations. "
                              "Requires: pip install shap. "
                              "Produces two companion files and adds top-N SHAP "
-                             "driver columns to the main results TSV.")
+                             "driver columns to the main results TSV. LightGBM models "
+                             "use exact TreeSHAP (log-odds); other models fall back to "
+                             "approximate KernelExplainer (probability).")
     parser.add_argument("-explain-samples", type=int, default=200,
                         dest="explain_samples",
                         help="Max positive predictions to explain with SHAP. "
@@ -296,10 +405,14 @@ def main() -> int:
                              "(default: 3)")
     parser.add_argument("-shap-nsamples", type=int, default=200,
                         dest="shap_nsamples",
-                        help="SHAP nsamples per explained row (default: 200)")
+                        help="SHAP nsamples per explained row (default: 200). "
+                             "KernelExplainer fallback only - TreeSHAP is exact and "
+                             "does not sample.")
     parser.add_argument("-shap-clusters", type=int, default=25,
                         dest="shap_clusters",
-                        help="k-means clusters for SHAP background (default: 15)")
+                        help="k-means clusters for SHAP background (default: 25). "
+                             "KernelExplainer fallback only - TreeSHAP needs no "
+                             "background set.")
 
     args = parser.parse_args()
 
