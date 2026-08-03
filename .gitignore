@@ -1,0 +1,36 @@
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# ── Environments ──────────────────────────────────────────────────────────
+# pixi installs each env under dependencies/<name>/.pixi/; only the
+# pixi.toml / pixi.lock pair is tracked.
+.pixi/
+.env
+
+# ── Model checkpoints ─────────────────────────────────────────────────────
+# Training writes to cnn_checkpoints/ and optuna writes trial_<n>.pt under
+# --ckpt-dir; the one shipped checkpoint stays tracked.
+*.pt
+!cnn_checkpoints/cnn_branches_mirbind_embed16_restruct.pt
+
+# ── Run artefacts ─────────────────────────────────────────────────────────
+*.db
+wandb/
+best_hparams_mirbind.json
+
+# Dataset tokenisation caches written next to each input TSV.
+*.cnncache.npz
+
+# ── Data ──────────────────────────────────────────────────────────────────
+# The v7 interaction tables run to several GB, so data/ is ignored by
+# default; the small background files are tracked explicitly.
+data/*
+!data/mirna_background.fa
+!data/mirna_background.tsv
+
+# ── Results ───────────────────────────────────────────────────────────────
+results/
+eqtl_results_cnn.tsv
+permutation_importance.tsv

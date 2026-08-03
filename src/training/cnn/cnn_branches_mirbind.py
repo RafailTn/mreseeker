@@ -2741,7 +2741,7 @@ def main() -> int:
                          "as the score column for cooperativity_analysis.py. "
                          "Ignored without --folds.")
     tr.add_argument("--test",       nargs="+", default=None, metavar="FILE")
-    tr.add_argument("--out",        default="checkpoints/cnn_mirbind.pt")
+    tr.add_argument("--out",        default="cnn_checkpoints/cnn_mirbind.pt")
     tr.add_argument("--mre-col",    default="mre_sequence",   dest="mre_col")
     tr.add_argument("--mirna-col",  default="mirna_sequence", dest="mirna_col")
     tr.add_argument("--seq-cons-channels", nargs="?", const="both", default=None,

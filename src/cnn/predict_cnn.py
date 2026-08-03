@@ -14,8 +14,8 @@ metrics are computed.
 
 Usage
 -----
-  python cnn/predict_cnn.py \\
-      --checkpoint checkpoints/cnn_seqonly.pt \\
+  python src/cnn/predict_cnn.py \\
+      --checkpoint cnn_checkpoints/cnn_branches_mirbind_embed16_restruct.pt \\
       --input pairs.tsv -o predictions.tsv \\
       --mre-col mre_sequence --mirna-col mirna_sequence
 """
@@ -31,8 +31,11 @@ import torch
 from torch.utils.data import DataLoader
 
 _HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
+# The model definition lives with the training code (src/training/cnn/), not
+# alongside this script, so add that directory rather than _HERE.
+_MODEL_DIR = _HERE.parent / "training" / "cnn"
+if str(_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(_MODEL_DIR))
 
 from cnn_branches_mirbind import (  # noqa: E402
     MiRNAInteractionDataset,
