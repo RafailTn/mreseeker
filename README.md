@@ -115,7 +115,12 @@ want the tracked file modified, or pass `-no_extend_background` to leave the
 z-scores `NaN` with a warning instead.
 
 **Explanations.** Add `-explain` for SHAP: a global importance table, a
-per-sample table, and top-N driver columns added to the main output.
+per-sample table, and top-N driver columns added to the main output. Because the
+default model is LightGBM, this uses exact TreeSHAP and the values are in
+**log-odds** — roughly 20x faster per row than the sampling explainer, with no
+`nsamples` or background set to choose. A non-LightGBM model falls back to the
+approximate `KernelExplainer`, whose values are in probability instead; the units are
+printed at the top of each run.
 
 ### Feature extraction on its own
 
@@ -245,7 +250,9 @@ src/training/cnn/     CNN model definition, training, Optuna search
 src/eqtl_analysis/    GTEx eQTL scoring with the CNN, PIP separation, miRNA expression ranking
 data/                 shuffle-background panel + the selected-feature JSON
 cnn_checkpoints/      shipped CNN checkpoint
-models_gluon/         AutoGluon predictor directory (not in git — download separately)
+models_gluon/         AutoGluon predictor directory, defaults to LightGBMLarge_BAG_L1
+                      (not in git — download separately)
+models_gluon_lgbm/    deployment clone of that default model alone (not in git)
 dependencies/         one Pixi manifest per environment
 ```
 
