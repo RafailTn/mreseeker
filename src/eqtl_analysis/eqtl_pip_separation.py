@@ -27,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -59,27 +60,41 @@ def filter_max_abs(df: pd.DataFrame, label: str, metric: str) -> pd.DataFrame:
     return out
 
 
-def mann_whitney(high: np.ndarray, low: np.ndarray, name: str) -> None:
+def mann_whitney(high: np.ndarray, low: np.ndarray, name: str) -> dict:
     u, p = scipy_stats.mannwhitneyu(high, low, alternative="two-sided")
     n1, n2 = len(high), len(low)
     # Rank-biserial effect size = 1 - 2U/(n1*n2)  (a.k.a. common-language effect).
+    # Negative => the high-PIP group ranks larger.
     rbc = 1.0 - (2.0 * u) / (n1 * n2)
     print(f"\n  Mann-Whitney U ({name}):  U={u:,.0f}  p={p:.3e}")
     print(f"    high: n={n1:,}  median={np.median(high):+.4f}  mean={high.mean():+.4f}")
     print(f"    low : n={n2:,}  median={np.median(low):+.4f}  mean={low.mean():+.4f}")
     print(f"    rank-biserial effect size = {rbc:+.4f}")
+    return {
+        "test": "mann_whitney_u", "metric": name, "U": float(u), "p_value": float(p),
+        "n_high": n1, "n_low": n2,
+        "median_high": float(np.median(high)), "median_low": float(np.median(low)),
+        "mean_high": float(high.mean()), "mean_low": float(low.mean()),
+        "rank_biserial": float(rbc),
+    }
 
 
-def correlate(df: pd.DataFrame, label: str) -> None:
+def correlate(df: pd.DataFrame, label: str) -> dict:
     valid = df.dropna(subset=[VALUE_COL, BETA_COL])
     if len(valid) < 3:
         print(f"  [{label}] n={len(valid)} — too few for correlation.")
-        return
+        return {"test": "correlation", "group": label, "n": len(valid)}
     sp_r, sp_p = scipy_stats.spearmanr(valid[VALUE_COL], valid[BETA_COL])
     pe_r, pe_p = scipy_stats.pearsonr(valid[VALUE_COL], valid[BETA_COL])
     print(f"  [{label}] n={len(valid):,}  "
           f"Pearson r={pe_r:+.4f} (p={pe_p:.3e})  "
           f"Spearman r={sp_r:+.4f} (p={sp_p:.3e})")
+    return {
+        "test": "correlation", "metric": f"{VALUE_COL}_vs_{BETA_COL}", "group": label,
+        "n": len(valid),
+        "pearson_r": float(pe_r), "pearson_p": float(pe_p),
+        "spearman_r": float(sp_r), "spearman_p": float(sp_p),
+    }
 
 
 def plot_histogram(high: np.ndarray, low: np.ndarray, path: Path) -> None:
@@ -147,17 +162,43 @@ def main() -> int:
     hv = high_f[VALUE_COL].to_numpy()
     lv = low_f[VALUE_COL].to_numpy()
     print(f"\n{'='*60}\nSEPARATION  (delta_pred: pip>0.9 vs pip<0.01)\n{'='*60}")
-    mann_whitney(hv, lv, "signed delta_pred")
-    mann_whitney(np.abs(hv), np.abs(lv), "|delta_pred|")
+    stats: list[dict] = [
+        mann_whitney(hv, lv, "signed delta_pred"),
+        mann_whitney(np.abs(hv), np.abs(lv), "|delta_pred|"),
+    ]
     plot_histogram(hv, lv, out_dir / "delta_pred_hist.png")
 
     # -- 4. Correlation of delta_pred with beta_marginal ----------------------
     print(f"\n{'='*60}\nCORRELATION  (delta_pred vs beta_marginal)\n{'='*60}")
     combined = pd.concat([high_f, low_f], ignore_index=True)
-    correlate(combined, "combined")
-    correlate(high_f,   "high pip>0.9")
-    correlate(low_f,    "low  pip<0.01")
+    stats += [correlate(combined, "combined"),
+              correlate(high_f,   "high pip>0.9"),
+              correlate(low_f,    "low  pip<0.01")]
     print(f"{'='*60}")
+
+    # -- 5. Persist the numbers ----------------------------------------------
+    # Everything above was previously stdout-only, so a run left no record of
+    # what it actually computed. Provenance goes in alongside the tests: the
+    # results are meaningless without knowing which inputs and dedup produced
+    # them.
+    run = {
+        "high_input": str(Path(args.high).resolve()),
+        "low_input": str(Path(args.low).resolve()),
+        "dedup_by": args.dedup_by,
+        "group_cols": GROUP_COLS,
+        "n_high_rows_in": len(high), "n_low_rows_in": len(low),
+        "n_high_after_dedup": len(high_f), "n_low_after_dedup": len(low_f),
+        "n_low_dropped_overlapping_high": n_dropped,
+    }
+    with open(out_dir / "separation_stats.json", "w") as fh:
+        json.dump({"run": run, "stats": stats}, fh, indent=2)
+
+    flat = pd.DataFrame(stats)
+    for k, v in run.items():
+        flat[k] = str(v) if isinstance(v, list) else v
+    flat.to_csv(out_dir / "separation_stats.tsv", sep="\t", index=False,
+                float_format="%.6g")
+    print(f"\n  Stats written to: {out_dir}/separation_stats.{{json,tsv}}")
     return 0
 
 

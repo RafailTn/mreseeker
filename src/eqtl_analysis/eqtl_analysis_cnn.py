@@ -42,8 +42,11 @@ import numpy as np
 import pandas as pd
 
 _HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
+# predict_cnn.py sits in src/cnn/, not alongside this script, so add that
+# directory rather than _HERE.
+_CNN_DIR = _HERE.parent / "cnn"
+if str(_CNN_DIR) not in sys.path:
+    sys.path.insert(0, str(_CNN_DIR))
 
 from predict_cnn import chimeric_key, dedup_chimeric, score_dataframe  # noqa: E402
 
