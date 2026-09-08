@@ -23,6 +23,7 @@ accuracy you must pay at least that much time", which is what a step draws.
 from __future__ import annotations
 
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -30,6 +31,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import matplotlib.transforms as mtransforms  # noqa: E402
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -90,6 +92,14 @@ DEFAULT_OFFSET = (9, 0, "left", "center")
 # cloud the front is drawn against, and naming them adds nothing.
 LABEL_ALL_MAX = 8
 
+# A front model is named only if it clears the previous named one by this
+# fraction of the facet's APS range. Several stacked models sit within 0.0001
+# APS of each other; drawing four names on a cluster the eye reads as one point
+# spends a lot of ink to say they are indistinguishable. The ends of the front
+# and the shipped default are always named, because those are the numbers the
+# panel is actually making a claim about.
+LABEL_GAP_FRAC = 0.08
+
 # Candidate label positions, tried in order, as (dx pt, dy pt, ha, va). The
 # first that collides with nothing already placed wins. Ordered by how well the
 # label reads: directly above or below first, then the diagonals, then further
@@ -107,6 +117,15 @@ CANDIDATES = [
 
 # Pixels of clearance demanded around each label and each marker.
 PAD_PX = 2.0
+
+# AutoGluon's names are mostly boilerplate: every candidate is bagged, and L1 is
+# the default layer. Stripping that roughly halves the label width, which is
+# what makes a 25-model facet readable at all. The parts that carry meaning -
+# the algorithm, the random-search tag, and L2 when a model is stacked - stay.
+def pretty_model(name: str) -> str:
+    n = name.replace("_BAG_L1", "").replace("_BAG_L2", " L2")
+    n = n.replace("WeightedEnsemble_L", "WeightedEns L")
+    return re.sub(r"_r(\d+)", r" r\1", n)
 
 # (left, right) multiplicative padding each facet needs to keep its labels inside
 # the axis. The leftout facet needs more room on the right: its slowest model is
@@ -209,6 +228,22 @@ def place_labels(ax, items, obstacles):
         taken.append(placed[1])
 
 
+def labelled_front(df, front, aps_col, sec_col):
+    """Which front models to name: the two ends, the shipped default, and any
+    that clear their predecessor by a visible margin."""
+    fd = df[df.model.isin(front)].sort_values(sec_col)
+    span = df[aps_col].max() - df[aps_col].min()
+    keep, last = set(), None
+    for _, r in fd.iterrows():
+        if last is None or r[aps_col] - last > LABEL_GAP_FRAC * span:
+            keep.add(r.model)
+            last = r[aps_col]
+    keep.add(fd.model.iloc[0])
+    keep.add(fd.loc[fd[aps_col].idxmax()].model)
+    keep.add(SHIPPED)
+    return keep
+
+
 def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
     ax.set_xscale("log")
     ax.grid(axis="both", lw=0.9, color=ps.GRID, zorder=0)
@@ -229,6 +264,7 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
             list(fd[aps_col]) + [fd[aps_col].iloc[-1]],
             where="post", color=ps.MUTED, lw=1.5, zorder=2, clip_on=True)
 
+    named = labelled_front(df, front, aps_col, sec_col)
     label_items = []
     marker_boxes = []
     for _, r in df.iterrows():
@@ -241,20 +277,27 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
         else:
             # Hollow = dominated. Fill carries the Pareto status, so the
             # distinction survives greyscale and colour-vision deficiency.
-            style = dict(ms=9.5, mfc=ps.SURFACE, mec=ps.DEEMPH, mew=1.8)
+            # Smaller and thinner than the front: with 17 of them they are the
+            # cloud the frontier is drawn against, not 17 things to inspect.
+            style = dict(ms=7.0, mfc=ps.SURFACE, mec=ps.DEEMPH, mew=1.2,
+                         alpha=0.75)
         # Timing spread, when the run had repeats to spread. Drawn under the
         # marker so a wide bar cannot hide which point it belongs to.
-        if f"{sec_col}_p25" in df.columns and pd.notna(r.get(f"{sec_col}_p25")):
+        if ((shipped or on_front) and f"{sec_col}_p25" in df.columns
+                and pd.notna(r.get(f"{sec_col}_p25"))):
             ax.plot([r[f"{sec_col}_p25"], r[f"{sec_col}_p75"]],
                     [r[aps_col]] * 2, "-",
                     color=ps.ACCENT_GLUON if shipped else ps.DEEMPH,
                     lw=1.6, zorder=3, clip_on=False, solid_capstyle="butt")
-        ax.plot(r[sec_col], r[aps_col], "o", zorder=5 if shipped else 4,
-                clip_on=False, **style)
+        # Explicit layering: cloud < front < shipped. Sharing one zorder left
+        # the order down to row order in the CSV, so a front marker could be
+        # painted behind a hollow neighbour it overlaps.
+        z = 6 if shipped else (5 if on_front else 3)
+        ax.plot(r[sec_col], r[aps_col], "o", zorder=z, clip_on=False, **style)
 
-        if shipped or on_front or len(df) <= LABEL_ALL_MAX:
+        if shipped or r.model in named or len(df) <= LABEL_ALL_MAX:
             label_items.append((
-                r[sec_col], r[aps_col], r.model,
+                r[sec_col], r[aps_col], pretty_model(r.model),
                 dict(fontsize=9.5, color=ps.INK if shipped else ps.INK_2,
                      fontweight="bold" if shipped else "normal", zorder=6),
                 0 if shipped else 1))
@@ -262,9 +305,27 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
     # Markers are obstacles for the labels, so a label never lands on a point.
     ax.figure.canvas.draw()
     rend = ax.figure.canvas.get_renderer()
-    for x, y, *_ in label_items:
+    for x, y in zip(df[sec_col], df[aps_col]):
         px, py = ax.transData.transform((x, y))
-        marker_boxes.append(mtransforms.Bbox.from_bounds(px - 8, py - 8, 16, 16))
+        marker_boxes.append(mtransforms.Bbox.from_bounds(px - 7, py - 7, 14, 14))
+
+    # The Pareto staircase too: a label laid across it reads as struck through.
+    # Sampled in display space so the log x axis needs no special handling.
+    step_x = list(fd[sec_col]) + [xlim[1]]
+    step_y = list(fd[aps_col]) + [fd[aps_col].iloc[-1]]
+    path = []
+    for i in range(len(step_x) - 1):
+        path.append((step_x[i], step_y[i]))
+        path.append((step_x[i + 1], step_y[i]))       # horizontal run
+        path.append((step_x[i + 1], step_y[i + 1]))   # riser
+    for (x0, y0), (x1, y1) in zip(path, path[1:]):
+        p0 = ax.transData.transform((x0, y0))
+        p1 = ax.transData.transform((x1, y1))
+        n = max(2, int(np.hypot(p1[0] - p0[0], p1[1] - p0[1]) // 10))
+        for t in np.linspace(0, 1, n):
+            px, py = p0 + (p1 - p0) * t
+            marker_boxes.append(
+                mtransforms.Bbox.from_bounds(px - 3, py - 3, 6, 6))
     label_items.sort(key=lambda t: t[4])       # shipped first
     place_labels(ax, [(x, y, t, kw) for x, y, t, kw, _ in label_items],
                  marker_boxes)

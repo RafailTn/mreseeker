@@ -322,9 +322,12 @@ def main() -> int:
         print(f"Sample composition -> {comp_path}")
 
     npz_path = out_prefix.with_suffix(".shap.npz")
+    # The model name travels with the values: a figure that hard-codes it goes
+    # stale the moment the shipped default changes, silently and in text.
     np.savez_compressed(npz_path, shap_values=shap_values,
                         feature_values=X_model.to_numpy(),
-                        features=np.array(features), label=y, baseline=baseline)
+                        features=np.array(features), label=y, baseline=baseline,
+                        model_name=np.array(model_name))
     print(f"SHAP matrix -> {npz_path}")
 
     mean_abs = np.abs(shap_values).mean(axis=0)

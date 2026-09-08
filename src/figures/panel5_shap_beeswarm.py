@@ -145,6 +145,11 @@ def main() -> None:
     shap, values = z["shap_values"], z["feature_values"]
     names = [str(f) for f in z["features"]]
 
+    # Older .npz files predate the model_name field; say nothing specific
+    # rather than name the wrong model.
+    model_name = (str(z["model_name"]) if "model_name" in z.files
+                  else "the shipped model")
+
     order = np.argsort(np.abs(shap).mean(axis=0))[::-1][:args.top]
     rng = np.random.default_rng(0)
     keep = (rng.choice(len(shap), args.max_points, replace=False)
@@ -230,7 +235,7 @@ def main() -> None:
         # describes the whole panel, so indenting it under the plotting area would
         # read as a note about the axes.
         fig.text(0.030, 0.20 / h,
-                 "TreeSHAP attributions for LightGBMLarge_BAG_L1 on a "
+                 f"TreeSHAP attributions for {model_name} on a "
                  "family-balanced sample of the Manakov v7 test set (25,000 pairs, "
                  "both classes; 4,000 drawn per row). Each point is one "
                  "(miRNA, MRE) pair;\nhorizontal position is that feature's "
