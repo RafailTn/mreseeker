@@ -24,13 +24,45 @@ _HERE = Path(__file__).parent
 # SUBPROCESS HELPER
 # =============================================================================
 
-def _run(cmd: list[str], step: str, timeout: int = 600) -> None:
+def _count_records(fasta: str) -> int:
+    """Records in a FASTA, for sizing the per-step timeout."""
+    n = 0
+    with open(fasta) as fh:
+        for line in fh:
+            if line.startswith(">"):
+                n += 1
+    return n
+
+
+def _step_timeout(n_pairs: int, override: int | None) -> int | None:
+    """Seconds to allow one pipeline step, or None for no limit.
+
+    A fixed cap cannot serve both a 954-pair test set and a 200k-pair one: the
+    old 600 s killed IntaRNA partway through the latter and threw away the whole
+    run. The budget therefore scales with the work. 0.06 s/pair is roughly 4x
+    the measured single-threaded IntaRNA cost, so it is a runaway guard rather
+    than a schedule - a step that trips it is stuck, not merely large.
+    """
+    if override is not None:
+        return None if override <= 0 else override
+    return int(900 + 0.06 * n_pairs)
+
+
+def _run(cmd: list[str], step: str, timeout: int | None = None) -> None:
     """
     Run a subprocess command (as a list — no shell=True needed).
     Raises RuntimeError with a clear message if the step fails.
     """
     print(f"[{step}] {' '.join(cmd)}")
-    result = subprocess.run(cmd, timeout=timeout)
+    try:
+        result = subprocess.run(cmd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"Step '{step}' exceeded its {timeout}s budget.\n"
+            f"Command: {' '.join(cmd)}\n"
+            f"If the input is simply large, raise or remove the limit with "
+            f"-timeout <seconds> (0 = no limit)."
+        ) from None
     if result.returncode != 0:
         raise RuntimeError(
             f"Step '{step}' failed with exit code {result.returncode}.\n"
@@ -383,6 +415,11 @@ def main() -> int:
     parser.add_argument("-threshold", type=float, default=0.5,
                         help="Probability threshold for positive interactions "
                              "(default: 0.5)")
+    parser.add_argument("-timeout", type=int, default=None,
+                        help="Seconds allowed per pipeline step. Default scales "
+                             "with the number of pairs (900s + 0.06s/pair); "
+                             "0 removes the limit entirely. Raise it if a large "
+                             "run is killed mid-IntaRNA.")
     parser.add_argument("-threads", type=int, default=4,
                         help="Threads for IntaRNA (default: 4)")
     parser.add_argument("-keep_files", action="store_true",
@@ -449,6 +486,12 @@ def main() -> int:
             print(f"Using existing BigWig: {local_bw}")
         bigwig_path = local_bw
 
+    # -- Per-step timeout ------------------------------------------------------
+    n_pairs = _count_records(args.query_fasta)
+    step_timeout = _step_timeout(n_pairs, args.timeout)
+    print(f"{n_pairs} pairs; per-step timeout: "
+          + ("none" if step_timeout is None else f"{step_timeout}s"))
+
     # -- Temp directory --------------------------------------------------------
     tmp_dir = Path(tempfile.mkdtemp(prefix="mirna_pipeline_"))
     print(f"Temp directory: {tmp_dir}\n")
@@ -462,7 +505,7 @@ def main() -> int:
              args.target_fasta, args.query_fasta,
              "-o", str(intarna_out),
              "--threads", str(args.threads)],
-            step="intarna",
+            step="intarna", timeout=step_timeout,
         )
 
         # -- Step 2: IntaRNA ensemble ------------------------------------------
@@ -472,7 +515,7 @@ def main() -> int:
              "-o", str(intarna_ens_out),
              "--threads", str(args.threads),
              "--ensemble"],
-            step="intarna-ensemble",
+            step="intarna-ensemble", timeout=step_timeout,
         )
 
         # -- Step 3: Merge -----------------------------------------------------
@@ -482,7 +525,7 @@ def main() -> int:
              "-m", str(intarna_out),
              "-e", str(intarna_ens_out),
              "-o", str(merged_out)],
-            step="merge",
+            step="merge", timeout=step_timeout,
         )
 
         # -- Step 4: Best structure per pair -----------------------------------
@@ -493,7 +536,7 @@ def main() -> int:
              "--mre-fasta", args.target_fasta,
              "--mirna-fasta", args.query_fasta,
              "--output", str(best_out)],
-            step="best-intarna",
+            step="best-intarna", timeout=step_timeout,
         )
 
         # -- Step 4b: Shuffle-background coverage ------------------------------
@@ -548,7 +591,7 @@ def main() -> int:
             feat_cmd += ["--bigwig", str(bigwig_path)]
         if args.mirna_background:
             feat_cmd += ["--mirna-background", args.mirna_background]
-        _run(feat_cmd, step="feature-extraction")
+        _run(feat_cmd, step="feature-extraction", timeout=step_timeout)
 
         # -- Step 6: Load model + predict --------------------------------------
         print(f"\nLoading predictor from: {args.model}")
