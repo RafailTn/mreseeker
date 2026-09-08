@@ -65,6 +65,7 @@ import json
 import os
 import platform
 import shutil
+import resource
 import socket
 import subprocess
 import sys
@@ -90,6 +91,10 @@ _EXCLUDE_FROM_TOTAL = {"model_load"}
 # Timing helpers - the protocol is the one in compare_models.py
 # ---------------------------------------------------------------------------
 
+def _prefixed(d: Dict[str, float], prefix: str) -> Dict[str, float]:
+    return {prefix + k: v for k, v in d.items()}
+
+
 def summarise_times(samples: List[float]) -> Dict[str, float]:
     """Reduce repeat timings to the columns written out.
 
@@ -108,18 +113,36 @@ def summarise_times(samples: List[float]) -> Dict[str, float]:
     }
 
 
+def _child_cpu() -> float:
+    """Cumulative CPU seconds burned by finished children (user + system)."""
+    ru = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return ru.ru_utime + ru.ru_stime
+
+
 class Stopwatch:
-    """Collects one stage->seconds mapping per pass."""
+    """Collects a stage->seconds mapping per pass, in two currencies.
+
+    Wall-clock answers "how long does a user wait", CPU-seconds answers "how
+    much compute does this cost". They are not interchangeable here and the
+    difference is the whole point of measuring both: IntaRNA is handed
+    --threads N and so can spend N CPU-seconds per wall-second, while the CNN
+    forward pass on CPU is largely one BLAS-parallel region and on GPU spends
+    almost no host CPU at all. A wall-clock-only comparison therefore moves
+    with the core count of whichever machine ran it, and a reader cannot tell
+    a genuinely cheaper pipeline from a better-parallelised one.
+    """
 
     def __init__(self) -> None:
         self.stages: Dict[str, float] = {}
+        self.cpu: Dict[str, float] = {}
 
     def run(self, cmd: List[str], stage: str) -> None:
         """Time a subprocess, failing loudly - a crashed stage must not be
         recorded as a fast one."""
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), _child_cpu()
         result = subprocess.run(cmd)
         self.stages[stage] = time.perf_counter() - t0
+        self.cpu[stage] = _child_cpu() - c0
         if result.returncode != 0:
             raise SystemExit(
                 f"ERROR: stage '{stage}' exited {result.returncode}\n"
@@ -137,10 +160,14 @@ class _StageTimer:
 
     def __enter__(self):
         self.t0 = time.perf_counter()
+        # process_time() sums every thread of this process, which is what an
+        # in-process stage costs; children are counted separately in run().
+        self.c0 = time.process_time()
         return self
 
     def __exit__(self, *exc):
         self.watch.stages[self.stage] = time.perf_counter() - self.t0
+        self.watch.cpu[self.stage] = time.process_time() - self.c0
         return False
 
 
@@ -148,7 +175,7 @@ class _StageTimer:
 # The two pipelines
 # ---------------------------------------------------------------------------
 
-def run_gluon_pass(args, tmp: Path) -> tuple[Dict[str, float], np.ndarray]:
+def run_gluon_pass(args, tmp: Path) -> tuple["Stopwatch", np.ndarray]:
     """One full FASTA-to-probability pass of the AutoGluon pipeline.
 
     The stage list mirrors src/gluon/predict_target.py exactly, including its
@@ -188,9 +215,10 @@ def run_gluon_pass(args, tmp: Path) -> tuple[Dict[str, float], np.ndarray]:
             cmd += ["--panel-fasta", args.panel_fasta]
         # Never --auto-extend here: it mutates the tracked background table, and a
         # benchmark that changes its own inputs between repeats is not a benchmark.
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), _child_cpu()
         subprocess.run(cmd)      # non-zero just means some z-scores stay NaN
         w.stages["background_check"] = time.perf_counter() - t0
+        w.cpu["background_check"] = _child_cpu() - c0
 
     feat_cmd = ["python3", str(_GLUON_DIR / "feature_extraction.py"),
                 "--intarna", str(best), "--mre-fasta", args.mre_fasta,
@@ -210,10 +238,10 @@ def run_gluon_pass(args, tmp: Path) -> tuple[Dict[str, float], np.ndarray]:
         proba = predictor.predict_proba(X, model=args.gluon_model_name)
 
     pos = 1 if 1 in proba.columns else True
-    return w.stages, np.asarray(proba[pos], dtype=float)
+    return w, np.asarray(proba[pos], dtype=float)
 
 
-def run_cnn_pass(args, df: pd.DataFrame) -> tuple[Dict[str, float], np.ndarray]:
+def run_cnn_pass(args, df: pd.DataFrame) -> tuple["Stopwatch", np.ndarray]:
     """One full sequence-to-probability pass of the CNN pipeline."""
     import torch  # noqa: PLC0415
     from torch.utils.data import DataLoader  # noqa: PLC0415
@@ -239,7 +267,7 @@ def run_cnn_pass(args, df: pd.DataFrame) -> tuple[Dict[str, float], np.ndarray]:
                             num_workers=args.cnn_workers, pin_memory=True)
         logits, _ = predict_logits(model, loader, dev)
 
-    return w.stages, 1.0 / (1.0 + np.exp(-logits))
+    return w, 1.0 / (1.0 + np.exp(-logits))
 
 
 # ---------------------------------------------------------------------------
@@ -318,28 +346,34 @@ def main() -> int:
             tag = f"pass {i - args.warmup + 1}/{args.repeats}" if timed else "warmup"
             print(f"  [{tag}] ...", flush=True)
             if args.pipeline == "gluon":
-                stages, proba = run_gluon_pass(args, tmp)
+                watch, proba = run_gluon_pass(args, tmp)
             else:
-                stages, proba = run_cnn_pass(args, cnn_df)
+                watch, proba = run_cnn_pass(args, cnn_df)
             if timed:
-                passes.append(stages)
+                passes.append(watch)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
     # Every pass runs the same stages, so any pass gives the stage order.
-    order = list(passes[0])
+    order = list(passes[0].stages)
     rows, raw = [], []
     for stage in order:
-        samples = [pss[stage] for pss in passes]
+        samples = [w.stages[stage] for w in passes]
+        cpu_samples = [w.cpu.get(stage, float("nan")) for w in passes]
         raw += [{"pipeline": args.pipeline, "stage": stage, "pass": k,
-                 "seconds": v} for k, v in enumerate(samples, 1)]
+                 "seconds": v, "cpu_seconds": c}
+                for k, (v, c) in enumerate(zip(samples, cpu_samples), 1)]
         rows.append({"pipeline": args.pipeline, "stage": stage,
-                     **summarise_times(samples)})
+                     **summarise_times(samples),
+                     **_prefixed(summarise_times(cpu_samples), "cpu_")})
 
-    totals = [sum(v for k, v in pss.items() if k not in _EXCLUDE_FROM_TOTAL)
-              for pss in passes]
+    totals = [sum(v for k, v in w.stages.items() if k not in _EXCLUDE_FROM_TOTAL)
+              for w in passes]
+    cpu_totals = [sum(v for k, v in w.cpu.items() if k not in _EXCLUDE_FROM_TOTAL)
+                  for w in passes]
     rows.append({"pipeline": args.pipeline, "stage": "TOTAL",
-                 **summarise_times(totals)})
+                 **summarise_times(totals),
+                 **_prefixed(summarise_times(cpu_totals), "cpu_")})
 
     summary = pd.DataFrame(rows)
     out = Path(args.output)
@@ -372,14 +406,22 @@ def main() -> int:
     }
     out.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
 
+    # Parallel efficiency, printed because it is the number that says how much
+    # of a wall-clock win is real work saved and how much is just more cores.
+    tot = summary.iloc[-1]
     width = max(len(s) for s in summary.stage)
     print(f"\n{args.pipeline} — {len(sites)} pairs"
           + (f", APS {aps:.4f}" if aps is not None else ""))
     for _, r in summary.iterrows():
         share = r.seconds / summary.iloc[-1].seconds * 100
         bar = "" if r.stage == "TOTAL" else f"  {share:5.1f}%"
-        print(f"  {r.stage:<{width}}  {r.seconds:8.2f}s"
-              f"  [{r.seconds_min:.2f}–{r.seconds_p75:.2f}, n={int(r.seconds_n)}]{bar}")
+        par = r.cpu_seconds / r.seconds if r.seconds > 0 else float("nan")
+        print(f"  {r.stage:<{width}}  {r.seconds:8.2f}s wall"
+              f"  [{r.seconds_min:.2f}–{r.seconds_p75:.2f}, n={int(r.seconds_n)}]"
+              f"  {r.cpu_seconds:8.2f}s cpu  ({par:4.1f}x){bar}")
+    print(f"\n  wall {tot.seconds:.2f}s, cpu {tot.cpu_seconds:.2f}s "
+          f"({tot.cpu_seconds / tot.seconds:.1f} cores' worth). Compare pipelines "
+          f"on cpu seconds; wall clock also reflects the thread count.")
     print(f"\nWritten: {out}, {out.with_suffix('.raw.csv')}, "
           f"{out.with_suffix('.meta.json')}")
     return 0

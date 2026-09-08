@@ -20,6 +20,7 @@ python3 src/figures/panel3_saec_overlap.py
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -31,20 +32,26 @@ ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ROOT / "results"
 OUT = RESULTS / "figures"
 
-# The bin the strict claim rests on, and the point an exact-match audit reports.
+# The bin the strict claim rests on.
 STRICT_BIN = "none"
-EXACT_BP = 50
 
 
-def main() -> None:
+def main(bare: bool = False) -> None:
+    """`bare` drops the figure legend. On the poster the caption beneath the
+    panel is the explanatory text, and repeating it inside the image both
+    duplicates it and shrinks the plotting area."""
     curve = pd.read_csv(RESULTS / "saec_mirbench_overlap.csv")
     table = pd.read_csv(RESULTS / "saec_aps_by_overlap.csv")
 
     ps.apply(9.5)
+    height = 4.45 if bare else 5.76
     fig, (axL, axR) = plt.subplots(
-        1, 2, figsize=(12.6, 6.8), gridspec_kw=dict(
-            width_ratios=[1.05, 1.0], wspace=0.24,
-            left=0.055, right=0.985, top=0.945, bottom=0.305))
+        1, 2, figsize=(12.6, height), gridspec_kw=dict(
+            width_ratios=[1.05, 1.0], wspace=0.24, left=0.055, right=0.985,
+            # Panel titles need a fixed 0.40 in of headroom, so the top margin
+            # is a length converted to a fraction, not a fixed fraction.
+            top=1 - 0.40 / height,
+            bottom=(0.68 if bare else 1.68) / height))
 
     # ---- (a) how much overlap, as a function of how strict "overlap" is ------
     # Log y: the two series are two orders of magnitude apart, and the whole
@@ -57,18 +64,6 @@ def main() -> None:
                  solid_capstyle="round", zorder=3)
 
     one = curve[curve.shared_bp == 1].iloc[0]
-    fifty = curve[curve.shared_bp == EXACT_BP].iloc[0]
-
-    # The exact-match reading, marked because it is the number a naive audit
-    # produces and it understates the locus overlap by roughly eightfold.
-    axL.plot([EXACT_BP], [fifty.frac_any_mirna], "o", ms=8, mfc=ps.SURFACE,
-             mec=ps.INK, mew=2.0, zorder=4)
-    axL.annotate(f"exact string match\nreports only {fifty.frac_any_mirna:.1%}",
-                 xy=(EXACT_BP, fifty.frac_any_mirna), xytext=(40, 0.20),
-                 fontsize=8.5, color=ps.INK_2, ha="right", va="center",
-                 arrowprops=dict(arrowstyle="-", color=ps.MUTED, lw=1.0,
-                                 shrinkA=0, shrinkB=5,
-                                 connectionstyle="arc3,rad=0.25"))
 
     axL.text(2.0, one.frac_any_mirna * 1.22, f"any miRNA — {one.frac_any_mirna:.1%}",
              fontsize=10, fontweight="bold", color=ps.INK, va="bottom")
@@ -132,31 +127,42 @@ def main() -> None:
                   loc="left", fontsize=11.5, fontweight="bold", color=ps.INK,
                   pad=10)
 
-    fig.text(
-        0.055, 0.022,
-        "Overlap between the SAEC (GSE304955) evaluation set and the miRBench v7 "
-        "corpus, and its effect on measured performance. 104,844 positive sites "
-        "and an equal number of\nsampled negatives were scored with the "
-        "Manakov-trained sequence CNN. Sites were matched to the union of the six "
-        "miRBench v7 sets by genomic interval on the same chromosome and\nstrand; "
-        "all windows are 50 nt in both corpora, so shared length is 50 - "
-        "|\u0394start|. "
-        "(a) Share of SAEC positives whose nearest miRBench window shares at least "
-        "the given number of\nbases, for a window bound by any miRNA (black) and "
-        "for one bound by the same miRNA (blue). The open marker is complete "
-        "overlap, the only case an exact sequence match\ndetects. (b) Average "
-        "precision within disjoint bins of that overlap, any miRNA (blue), against "
-        "the random-classifier baseline, which equals the positive rate of each bin "
-        "(grey);\nshaded bars give the difference. 99.8% of rows belong to a miRNA "
-        "family present in the training corpus.",
-        fontsize=8.5, color=ps.INK_2, va="bottom", linespacing=1.5)
+    if not bare:
+        # Flush to the figure edge and wrapped to its full width: the legend
+        # describes the whole panel, not the left axis it used to sit under.
+        # Flush to the figure edge and wrapped to its full width: the legend
+        # describes the whole panel, not the left axis it used to sit under.
+        # Wrapped by measure rather than by hand so a figsize change cannot push
+        # a line off the canvas.
+        legend = (
+            "Overlap between the SAEC (GSE304955) evaluation set and the miRBench v7 "
+            "corpus, and its effect on measured performance. 104,844 positive sites and "
+            "an equal number of sampled negatives were scored with the Manakov-trained "
+            "sequence CNN. Sites were matched to the union of the six miRBench v7 sets by "
+            "genomic interval on the same chromosome and strand; all windows are 50 nt in "
+            "both corpora, so shared length is 50 - |\u0394start|. "
+            "(a) Share of SAEC positives whose nearest miRBench window shares at least the "
+            "given number of bases, for a window bound by any miRNA (black) and for one "
+            "bound by the same miRNA (blue). Complete overlap, at 50 bases, is the only "
+            "case an exact sequence match detects. "
+            "(b) Average precision within disjoint bins of that overlap, any miRNA (blue), "
+            "against the random-classifier baseline, which equals the positive rate of "
+            "each bin (grey); shaded bars give the difference. 99.8% of rows belong to a "
+            "miRNA family present in the training corpus.")
+        fig.text(
+            0.030, 0.020, "\n".join(textwrap.wrap(legend, width=176)),
+            fontsize=8.5, color=ps.INK_2, va="bottom", linespacing=1.5)
 
+    # The bare cut is a separate file: the standalone figure still wants its
+    # legend, and only the poster copy goes without one.
+    name = "panel3_bare" if bare else "panel3_saec_overlap"
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
-        fig.savefig(OUT / f"panel3_saec_overlap.{ext}", **kw)
+        fig.savefig(OUT / f"{name}.{ext}", **kw)
     plt.close(fig)
-    print("wrote", OUT / "panel3_saec_overlap.{png,svg,pdf}")
+    print("wrote", OUT / f"{name}.{{png,svg,pdf}}")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(bare="--bare" in sys.argv)

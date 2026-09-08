@@ -75,9 +75,19 @@ OFFSETS = {
 # it describes drops it straight onto a neighbouring label in the leftout facet.
 ANNOT_XY = (0.975, 0.045)
 
-# Explicit log ticks - the default decade-only ticks leave the axis unreadable
-# when every point sits inside one decade.
+# Explicit log ticks for the committed six-model run - the default decade-only
+# ticks leave the axis unreadable when every point sits inside one decade. A
+# wider run falls back to nice_ticks() below.
 XTICKS = {"test": [10, 20, 50, 100, 200, 500], "leftout": [1, 2, 5, 10, 20, 50]}
+
+# Where a model with no hand-set offset puts its label. Only ever used for
+# front models in a run wider than the six this file was tuned against.
+DEFAULT_OFFSET = (9, 0, "left", "center")
+
+# Above this many models, labelling every point is illegible, so only the
+# Pareto front and the shipped default are named - the rest are the hollow
+# cloud the front is drawn against, and naming them adds nothing.
+LABEL_ALL_MAX = 8
 
 # (left, right) multiplicative padding each facet needs to keep its labels inside
 # the axis. The leftout facet needs more room on the right: its slowest model is
@@ -107,6 +117,18 @@ def compute_xlims(df):
         grow = 10 ** ((span - math.log10(hi / lo)) / 2.0)
         out[key] = (lo / grow, hi * grow)
     return out
+
+
+def nice_ticks(lo, hi):
+    """1-2-5 ticks spanning [lo, hi]. Used when a run's range escapes XTICKS."""
+    out, d = [], math.floor(math.log10(lo))
+    while 10 ** d <= hi * 1.001:
+        for m in (1, 2, 5):
+            v = m * 10 ** d
+            if lo <= v <= hi:
+                out.append(v if v >= 1 else round(v, 10))
+        d += 1
+    return out or [lo, hi]
 
 
 def pareto_front(df, aps_col, sec_col):
@@ -155,16 +177,24 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
             # Hollow = dominated. Fill carries the Pareto status, so the
             # distinction survives greyscale and colour-vision deficiency.
             style = dict(ms=9.5, mfc=ps.SURFACE, mec=ps.DEEMPH, mew=1.8)
+        # Timing spread, when the run had repeats to spread. Drawn under the
+        # marker so a wide bar cannot hide which point it belongs to.
+        if f"{sec_col}_p25" in df.columns and pd.notna(r.get(f"{sec_col}_p25")):
+            ax.plot([r[f"{sec_col}_p25"], r[f"{sec_col}_p75"]],
+                    [r[aps_col]] * 2, "-",
+                    color=ps.ACCENT_GLUON if shipped else ps.DEEMPH,
+                    lw=1.6, zorder=3, clip_on=False, solid_capstyle="butt")
         ax.plot(r[sec_col], r[aps_col], "o", zorder=5 if shipped else 4,
                 clip_on=False, **style)
 
-        dx, dy, ha, va = OFFSETS[key][r.model]
-        ax.annotate(
-            r.model, (r[sec_col], r[aps_col]),
-            textcoords="offset points", xytext=(dx, dy), ha=ha, va=va,
-            fontsize=9.5, color=ps.INK if shipped else ps.INK_2,
-            fontweight="bold" if shipped else "normal", zorder=6,
-        )
+        if shipped or on_front or len(df) <= LABEL_ALL_MAX:
+            dx, dy, ha, va = OFFSETS[key].get(r.model, DEFAULT_OFFSET)
+            ax.annotate(
+                r.model, (r[sec_col], r[aps_col]),
+                textcoords="offset points", xytext=(dx, dy), ha=ha, va=va,
+                fontsize=9.5, color=ps.INK if shipped else ps.INK_2,
+                fontweight="bold" if shipped else "normal", zorder=6,
+            )
 
     # What walking the front from the shipped default to its top actually costs.
     a = df.loc[df.model == SHIPPED].iloc[0]
@@ -183,33 +213,41 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
     ax.set_ylabel("average precision (APS)")
     ps.despine(ax)
 
-    ax.set_xticks(XTICKS[key])
-    ax.set_xticklabels([str(t) for t in XTICKS[key]])
+    ticks = [t for t in XTICKS[key] if xlim[0] <= t <= xlim[1]]
+    if len(ticks) < 3:            # a wider run has escaped the tuned ticks
+        ticks = nice_ticks(*xlim)
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([f"{t:g}" for t in ticks])
     ax.minorticks_off()
 
 
-def main():
-    df = pd.read_csv(SRC)
+def main(bare: bool = False, src: Path = SRC, name: str | None = None):
+    """`bare` drops the headline, standfirst and footnote. On the poster the
+    caption beneath the panel carries all of that, and duplicating it inside
+    the image both repeats the text and squeezes the two facets."""
+    df = pd.read_csv(src)
     ps.apply(base=11)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.0, 5.9))
-    fig.subplots_adjust(left=0.075, right=0.985, top=0.685, bottom=0.185,
-                        wspace=0.26)
+    fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.55 if bare else 5.9))
+    fig.subplots_adjust(left=0.075, right=0.985,
+                        top=0.855 if bare else 0.685,
+                        bottom=0.125 if bare else 0.185, wspace=0.26)
 
     xlims = compute_xlims(df)
     for ax, (key, aps_col, sec_col, title) in zip(axes, FACETS):
         draw_facet(ax, df, aps_col, sec_col, title, key, xlims[key])
 
-    fig.text(0.075, 0.968,
-             "The shipped default is the cheapest model on the Pareto front",
-             fontsize=16, fontweight="bold", color=ps.INK, ha="left",
-             va="top", transform=fig.transFigure)
-    fig.text(0.075, 0.905,
-             "Six AutoGluon candidates. Hollow points are dominated — another candidate is both "
-             "faster and more accurate.\nThe shipped default is the fastest model on the front "
-             "in both evaluation sets.",
-             fontsize=10.5, color=ps.INK_2, ha="left", va="top",
-             linespacing=1.5, transform=fig.transFigure)
+    if not bare:
+        fig.text(0.075, 0.968,
+                 "The shipped default is the cheapest model on the Pareto front",
+                 fontsize=16, fontweight="bold", color=ps.INK, ha="left",
+                 va="top", transform=fig.transFigure)
+        fig.text(0.075, 0.905,
+                 "Six AutoGluon candidates. Hollow points are dominated — another candidate is both "
+                 "faster and more accurate.\nThe shipped default is the fastest model on the front "
+                 "in both evaluation sets.",
+                 fontsize=10.5, color=ps.INK_2, ha="left", va="top",
+                 linespacing=1.5, transform=fig.transFigure)
 
     handles = [
         plt.Line2D([], [], marker="o", ls="", ms=11, mfc=ps.ACCENT_GLUON,
@@ -221,28 +259,41 @@ def main():
         plt.Line2D([], [], color=ps.MUTED, lw=1.5, label="Pareto front"),
     ]
     # One row under the subtitle, clear of both the headline and the facets.
-    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.072, 0.800),
+    fig.legend(handles=handles, loc="upper left",
+               bbox_to_anchor=(0.072, 0.985 if bare else 0.800),
                ncol=4, columnspacing=1.8, handletextpad=0.5,
                labelcolor=ps.INK_2)
 
-    fig.text(0.075, 0.016,
-             "Both facets: single timing run, results/model_aps_manakov.csv. Absolute values are "
-             "not comparable across facets — the two sets differ in size.\nBoth x-axes span the "
-             "same decades, so equal horizontal distance means equal speed ratio. The front is "
-             "set-specific — LightGBMXT_BAG_L1 is on it for leftout only.\nThe shipped default is "
-             "a 138 MB deployment clone of a 6.8 GB stack, and stays exactly explainable through "
-             "TreeSHAP.",
-             fontsize=8.5, color=ps.MUTED, ha="left", va="bottom",
-             linespacing=1.5, transform=fig.transFigure)
+    if not bare:
+        fig.text(0.075, 0.016,
+                 "Both facets: single timing run, results/model_aps_manakov.csv. Absolute values are "
+                 "not comparable across facets — the two sets differ in size.\nBoth x-axes span the "
+                 "same decades, so equal horizontal distance means equal speed ratio. The front is "
+                 "set-specific — LightGBMXT_BAG_L1 is on it for leftout only.\nThe shipped default is "
+                 "a 138 MB deployment clone of a 6.8 GB stack, and stays exactly explainable through "
+                 "TreeSHAP.",
+                 fontsize=8.5, color=ps.MUTED, ha="left", va="bottom",
+                 linespacing=1.5, transform=fig.transFigure)
 
+    name = name or ("panel2_bare" if bare else "panel2_model_tradeoff")
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
-        fig.savefig(OUT / f"panel2_model_tradeoff.{ext}", **kw)
+        fig.savefig(OUT / f"{name}.{ext}", **kw)
     plt.close(fig)
-    print("wrote", OUT / "panel2_model_tradeoff.{png,svg,pdf}")
+    print("wrote", OUT / f"{name}.{{png,svg,pdf}}")
     for key, aps_col, sec_col, _ in FACETS:
         print(f"  {key:8s} front: {pareto_front(df, aps_col, sec_col)}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--csv", type=Path, default=SRC,
+                    help="compare_models.py output to plot (default "
+                         "results/model_aps_manakov.csv).")
+    ap.add_argument("--bare", action="store_true",
+                    help="Drop the headline, standfirst and footnote, for the "
+                         "poster, where the caption carries them.")
+    ap.add_argument("--name", default=None, help="Output basename.")
+    a = ap.parse_args()
+    main(bare=a.bare, src=a.csv, name=a.name)
