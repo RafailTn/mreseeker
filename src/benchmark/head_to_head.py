@@ -44,22 +44,56 @@ PROB_COLS = ["interaction_probability", "prob", "proba", "score"]
 LABEL_COL = "label"
 
 
-def load(spec: str) -> tuple[str, np.ndarray, np.ndarray]:
-    """Split a NAME:PATH spec and return (name, y_true, y_score)."""
+def _read(path: Path) -> pd.DataFrame:
+    sep = "\t" if path.suffix in (".tsv", ".txt") else ","
+    return pd.read_csv(path, sep=sep, low_memory=False)
+
+
+def load(spec: str, labels: dict[str, Path]) -> tuple[str, np.ndarray, np.ndarray]:
+    """Split a NAME:PATH spec and return (name, y_true, y_score).
+
+    predict_target.py drops the label column before scoring, so its output has
+    probabilities and no truth. `labels` supplies the source table for those
+    files. The whole pipeline is row-index aligned by construction - make_fastas
+    establishes the order and feature_extraction joins back on it - so the join
+    is positional, but it is checked: lengths must match, and where both tables
+    carry the sequence columns every row must agree. A silent misalignment here
+    would score real probabilities against the wrong truth and look plausible.
+    """
     if ":" not in spec:
         raise SystemExit(f"ERROR: '{spec}' is not in NAME:PATH form.")
     name, path = spec.rsplit(":", 1)
     p = Path(path)
     if not p.exists():
         raise SystemExit(f"ERROR: no such file: {p}")
-    sep = "\t" if p.suffix in (".tsv", ".txt") else ","
-    df = pd.read_csv(p, sep=sep, low_memory=False)
+    df = _read(p)
     prob = next((c for c in PROB_COLS if c in df.columns), None)
     if prob is None:
         raise SystemExit(
             f"ERROR: {p} has no probability column (looked for {PROB_COLS}).")
+
     if LABEL_COL not in df.columns:
-        raise SystemExit(f"ERROR: {p} has no '{LABEL_COL}' column.")
+        src = labels.get(name)
+        if src is None:
+            raise SystemExit(
+                f"ERROR: {p} has no '{LABEL_COL}' column and no --labels entry "
+                f"for '{name}'. Pass --labels \"{name}:<the v7 TSV it was "
+                f"scored from>\".")
+        truth = _read(src)
+        if len(truth) != len(df):
+            raise SystemExit(
+                f"ERROR: {src} has {len(truth)} rows but {p} has {len(df)}. "
+                f"These are not the same set of pairs; refusing to join.")
+        for col in ("gene", "noncodingRNA"):
+            if col in df.columns and col in truth.columns:
+                bad = int((df[col].astype(str).to_numpy()
+                           != truth[col].astype(str).to_numpy()).sum())
+                if bad:
+                    raise SystemExit(
+                        f"ERROR: {col} disagrees on {bad} rows between {p} and "
+                        f"{src}; the row order does not match.")
+        df = df.assign(**{LABEL_COL: truth[LABEL_COL].to_numpy()})
+
     d = df[[LABEL_COL, prob]].dropna()
     return name, d[LABEL_COL].to_numpy(), d[prob].to_numpy(dtype=float)
 
@@ -91,6 +125,10 @@ def main() -> int:
                     help="Sequence-CNN predictions for one set. Repeatable.")
     ap.add_argument("--gluon", action="append", default=[], metavar="NAME:PATH",
                     help="Feature-model predictions for one set. Repeatable.")
+    ap.add_argument("--labels", action="append", default=[], metavar="NAME:PATH",
+                    help="Truth table for a set whose prediction file carries no "
+                         "label column - predict_target.py drops it. Joined by "
+                         "row order, with the order verified. Repeatable.")
     ap.add_argument("--bootstrap", type=int, default=200, metavar="N",
                     help="Bootstrap resamples per entry (default 200). Cost is "
                          "N scorings of the whole set, so the big sets dominate; "
@@ -102,11 +140,18 @@ def main() -> int:
     if not args.cnn and not args.gluon:
         raise SystemExit("ERROR: give at least one --cnn or --gluon entry.")
 
+    labels: dict[str, Path] = {}
+    for spec in args.labels:
+        if ":" not in spec:
+            raise SystemExit(f"ERROR: '{spec}' is not in NAME:PATH form.")
+        n, pth = spec.rsplit(":", 1)
+        labels[n] = Path(pth)
+
     rows: List[dict] = []
     for model, specs in (("sequence CNN", args.cnn),
                          ("IntaRNA features + LightGBM", args.gluon)):
         for spec in specs:
-            name, y, s = load(spec)
+            name, y, s = load(spec, labels)
             point, lo, hi = aps_ci(y, s, args.bootstrap)
             rows.append({"model": model, "dataset": name, "n": len(y),
                          "pos_rate": float(y.mean()), "aps": point,
