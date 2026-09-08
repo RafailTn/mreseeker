@@ -29,6 +29,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.transforms as mtransforms  # noqa: E402
 import pandas as pd  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -38,7 +39,7 @@ REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "results" / "model_aps_manakov.csv"
 OUT = REPO / "results" / "figures"
 
-SHIPPED = "LightGBMLarge_BAG_L1"
+SHIPPED = "CatBoost_BAG_L1"
 REFERENCE = "WeightedEnsemble_L3"
 
 FACETS = [
@@ -88,6 +89,24 @@ DEFAULT_OFFSET = (9, 0, "left", "center")
 # Pareto front and the shipped default are named - the rest are the hollow
 # cloud the front is drawn against, and naming them adds nothing.
 LABEL_ALL_MAX = 8
+
+# Candidate label positions, tried in order, as (dx pt, dy pt, ha, va). The
+# first that collides with nothing already placed wins. Ordered by how well the
+# label reads: directly above or below first, then the diagonals, then further
+# out. A hand-tuned table cannot survive a run whose model list changes, so
+# placement is measured rather than declared.
+CANDIDATES = [
+    (0, 13, "center", "bottom"), (0, -13, "center", "top"),
+    (11, 0, "left", "center"), (-11, 0, "right", "center"),
+    (10, 9, "left", "bottom"), (-10, 9, "right", "bottom"),
+    (10, -9, "left", "top"), (-10, -9, "right", "top"),
+    (0, 26, "center", "bottom"), (0, -26, "center", "top"),
+    (22, 0, "left", "center"), (-22, 0, "right", "center"),
+    (0, 39, "center", "bottom"), (0, -39, "center", "top"),
+]
+
+# Pixels of clearance demanded around each label and each marker.
+PAD_PX = 2.0
 
 # (left, right) multiplicative padding each facet needs to keep its labels inside
 # the axis. The leftout facet needs more room on the right: its slowest model is
@@ -146,6 +165,50 @@ def pareto_front(df, aps_col, sec_col):
     return front
 
 
+def _overlaps(a, b, pad=PAD_PX):
+    return not (a.x1 + pad < b.x0 or b.x1 + pad < a.x0 or
+                a.y1 + pad < b.y0 or b.y1 + pad < a.y0)
+
+
+def place_labels(ax, items, obstacles):
+    """Annotate each item at the first candidate offset that stays clear.
+
+    `items` are (x, y, text, kwargs) in data coordinates, already in the order
+    they should win ties - the shipped default first, so it never gets pushed
+    somewhere awkward to make room for a model nobody is looking for.
+    `obstacles` are display-space boxes that must stay uncovered: the markers.
+
+    Falls back to the first candidate when every option collides, which keeps a
+    dense facet readable-ish rather than silently dropping a label.
+    """
+    fig = ax.figure
+    fig.canvas.draw()                       # a renderer must exist to measure
+    rend = fig.canvas.get_renderer()
+    # A label that leaves the axes is worse than one that is merely close to a
+    # neighbour: it collides with the next facet, the y label, or the figure
+    # edge, none of which are in `obstacles`.
+    bounds = ax.get_window_extent(rend)
+    taken = list(obstacles)
+    for x, y, text, kw in items:
+        placed = None
+        for dx, dy, ha, va in CANDIDATES:
+            ann = ax.annotate(text, (x, y), textcoords="offset points",
+                              xytext=(dx, dy), ha=ha, va=va, **kw)
+            box = ann.get_window_extent(rend)
+            inside = (box.x0 >= bounds.x0 and box.x1 <= bounds.x1
+                      and box.y0 >= bounds.y0 and box.y1 <= bounds.y1)
+            if inside and not any(_overlaps(box, t) for t in taken):
+                placed = (ann, box)
+                break
+            ann.remove()
+        if placed is None:
+            dx, dy, ha, va = CANDIDATES[0]
+            ann = ax.annotate(text, (x, y), textcoords="offset points",
+                              xytext=(dx, dy), ha=ha, va=va, **kw)
+            placed = (ann, ann.get_window_extent(rend))
+        taken.append(placed[1])
+
+
 def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
     ax.set_xscale("log")
     ax.grid(axis="both", lw=0.9, color=ps.GRID, zorder=0)
@@ -166,6 +229,8 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
             list(fd[aps_col]) + [fd[aps_col].iloc[-1]],
             where="post", color=ps.MUTED, lw=1.5, zorder=2, clip_on=True)
 
+    label_items = []
+    marker_boxes = []
     for _, r in df.iterrows():
         shipped = r.model == SHIPPED
         on_front = r.model in front
@@ -188,17 +253,29 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
                 clip_on=False, **style)
 
         if shipped or on_front or len(df) <= LABEL_ALL_MAX:
-            dx, dy, ha, va = OFFSETS[key].get(r.model, DEFAULT_OFFSET)
-            ax.annotate(
-                r.model, (r[sec_col], r[aps_col]),
-                textcoords="offset points", xytext=(dx, dy), ha=ha, va=va,
-                fontsize=9.5, color=ps.INK if shipped else ps.INK_2,
-                fontweight="bold" if shipped else "normal", zorder=6,
-            )
+            label_items.append((
+                r[sec_col], r[aps_col], r.model,
+                dict(fontsize=9.5, color=ps.INK if shipped else ps.INK_2,
+                     fontweight="bold" if shipped else "normal", zorder=6),
+                0 if shipped else 1))
+
+    # Markers are obstacles for the labels, so a label never lands on a point.
+    ax.figure.canvas.draw()
+    rend = ax.figure.canvas.get_renderer()
+    for x, y, *_ in label_items:
+        px, py = ax.transData.transform((x, y))
+        marker_boxes.append(mtransforms.Bbox.from_bounds(px - 8, py - 8, 16, 16))
+    label_items.sort(key=lambda t: t[4])       # shipped first
+    place_labels(ax, [(x, y, t, kw) for x, y, t, kw, _ in label_items],
+                 marker_boxes)
 
     # What walking the front from the shipped default to its top actually costs.
+    # The reference is whatever tops this facet's front, not a fixed model name:
+    # with 25 candidates the most accurate model differs between the two sets,
+    # and naming one of them would silently quote the wrong comparison.
     a = df.loc[df.model == SHIPPED].iloc[0]
-    b = df.loc[df.model == REFERENCE].iloc[0]
+    fd_all = df[df.model.isin(front)]
+    b = fd_all.loc[fd_all[aps_col].idxmax()]
     ax.annotate(
         f"top of front vs shipped default:\n"
         f"+{b[aps_col] - a[aps_col]:.4f} APS for {b[sec_col] / a[sec_col]:.1f}× the time",
@@ -214,7 +291,10 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
     ps.despine(ax)
 
     ticks = [t for t in XTICKS[key] if xlim[0] <= t <= xlim[1]]
-    if len(ticks) < 3:            # a wider run has escaped the tuned ticks
+    # Only keep the tuned ticks if they actually span the axis; a wider run
+    # leaves them clustered at one end, which reads as an axis that starts
+    # where the ticks do.
+    if len(ticks) < 3 or ticks[0] > xlim[0] * 4 or ticks[-1] < xlim[1] / 4:
         ticks = nice_ticks(*xlim)
     ax.set_xticks(ticks)
     ax.set_xticklabels([f"{t:g}" for t in ticks])
