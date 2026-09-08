@@ -35,7 +35,7 @@ OUT = REPO / "results" / "figures"
 CKPT = REPO / "cnn_checkpoints" / "cnn_branches_mirbind_embed16_restruct.pt"
 PAIRS = REPO / "data" / "eqtl_tp_pairs.tsv"
 FEATURE_JSON = REPO / "data" / "selected_features_from56ft.json"
-BAG_DIR = REPO / "models_gluon_lgbm" / "models" / "LightGBMLarge_BAG_L1"
+BAG_DIR = REPO / "models" / "gluon_total_try" / "models" / "CatBoost_BAG_L1"
 
 MRE_LEN, MAX_MIRNA = 50, 30          # cnn_branches_mirbind.py
 SEED = (2, 8)                        # miRNA seed, 1-based inclusive
@@ -262,7 +262,7 @@ def main():
     arrow(ax, 78.6, MID_A, 79.4, MID_A, BLUE)
 
     # -- track B: features + LightGBM -------------------------------------
-    ax.text(17.0, 39.6, "B   Thermodynamic features → LightGBM",
+    ax.text(17.0, 39.6, "B   Thermodynamic features → gradient-boosted trees",
             fontsize=12.5, fontweight="bold", color=ORANGE, ha="left", va="bottom")
 
     stage(ax, 17.0, 35.0, B0, B1, "IntaRNA duplex",
@@ -274,9 +274,9 @@ def main():
     draw_features(ax, 38.0, B1, ORANGE)
     arrow(ax, 58.6, MID_B, 59.4, MID_B, ORANGE)
 
-    stage(ax, 60.0, 78.0, B0, B1, "LightGBMLarge_BAG_L1",
-          [f"{n_folds}-fold bagged", "the shipped default of six",
-           "AutoGluon candidates", "138 MB deployment clone"],
+    stage(ax, 60.0, 78.0, B0, B1, "CatBoost_BAG_L1",
+          [f"{n_folds}-fold bagged", "the shipped default of 25",
+           "AutoGluon candidates", "27 MB deployment clone"],
           ORANGE, ps.GLUON_FILL)
     arrow(ax, 78.6, MID_B, 79.4, MID_B, ORANGE)
 

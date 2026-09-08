@@ -219,7 +219,7 @@ def main() -> None:
     # Bare mode has no room above the strip before the x label, so the key's
     # own label goes inline after "high" instead of over it.
     if args.bare:
-        cax.text(1.16, 0.5, "feature value", transform=cax.transAxes,
+        cax.text(1.30, 0.5, "feature value", transform=cax.transAxes,
                  ha="left", va="center", fontsize=8.5, color=ps.INK_2)
     else:
         cax.text(0.5, 2.6, "feature value", transform=cax.transAxes,

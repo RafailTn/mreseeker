@@ -15,6 +15,7 @@ __pycache__/
 *.pt
 !cnn_checkpoints/cnn_branches_mirbind_embed16_restruct.pt
 models_gluon/
+models/
 
 # ── Run artefacts ─────────────────────────────────────────────────────────
 *.db

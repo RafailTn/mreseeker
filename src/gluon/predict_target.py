@@ -109,39 +109,49 @@ def _positive_class_shap(vals) -> np.ndarray:
     return vals
 
 
-def _lightgbm_boosters(predictor: TabularPredictor) -> list | None:
+def _tree_boosters(predictor: TabularPredictor,
+                   model_name: str | None = None) -> tuple[list, list[str]] | None:
     """
-    The raw LightGBM Boosters behind the predictor's default model, or None.
+    The raw tree models behind one predictor model, plus their feature order.
 
-    Returns None for anything that is not pure LightGBM - a stacked ensemble mixing in
-    neural nets has no tree structure to walk, and must fall back to KernelExplainer.
-    A bagged model contributes one Booster per fold.
+    Returns None for anything TreeSHAP cannot walk - a stacked ensemble mixing in
+    neural nets has no tree structure, and must fall back to KernelExplainer. A
+    bagged model contributes one booster per fold.
+
+    Both LightGBM and CatBoost are accepted: the shipped default moved from
+    LightGBMLarge to CatBoost, and returning None for CatBoost would have
+    silently downgraded `-explain` from exact TreeSHAP to a sampled
+    approximation for the one model that actually ships.
     """
-    try:
-        import lightgbm as lgb
-    except ImportError:
-        return None
-
-    model = predictor._trainer.load_model(predictor.model_best)
+    model = predictor._trainer.load_model(model_name or predictor.model_best)
     if hasattr(model, "models") and hasattr(model, "load_child"):
         children = [getattr(model.load_child(c), "model", None) for c in model.models]
     else:
         children = [getattr(model, "model", None)]
-
-    if not children or not all(isinstance(c, lgb.Booster) for c in children):
+    if not children or any(c is None for c in children):
         return None
 
+    def names_of(c):
+        if hasattr(c, "feature_name"):          # lightgbm.Booster
+            return list(c.feature_name())
+        if getattr(c, "feature_names_", None):  # catboost.CatBoostClassifier
+            return list(c.feature_names_)
+        return None
+
+    names = names_of(children[0])
+    if names is None:
+        return None
     # Averaging fold SHAP values is only valid if the folds agree on column order.
-    names = children[0].feature_name()
-    if any(c.feature_name() != names for c in children):
+    if any(names_of(c) != names for c in children):
         return None
-    return children
+    return children, names
 
 
 def compute_tree_shap(
     predictor: TabularPredictor,
     boosters: list,
     X_explain: pd.DataFrame,
+    names: list[str],
 ) -> tuple[np.ndarray, float, list[str]]:
     """
     Exact SHAP values via TreeSHAP, in LOG-ODDS space.
@@ -159,7 +169,6 @@ def compute_tree_shap(
     import shap
 
     X_model = predictor.transform_features(X_explain)
-    names = list(boosters[0].feature_name())
 
     print(f"Computing TreeSHAP for {len(X_explain)} samples "
           f"across {len(boosters)} bagged fold(s) ...")
@@ -275,10 +284,11 @@ def build_explanation_outputs(
     # TreeSHAP where the model allows it - exact, ~20x faster per row, and it needs no
     # background set. Anything that is not pure LightGBM has no trees to walk and falls
     # back to the sampling explainer.
-    boosters = _lightgbm_boosters(predictor)
-    if boosters:
+    found = _tree_boosters(predictor)
+    if found:
+        boosters, names = found
         shap_vals, baseline, feat_cols = compute_tree_shap(
-            predictor, boosters, X_explain,
+            predictor, boosters, X_explain, names,
         )
         units = "log-odds"
     else:
