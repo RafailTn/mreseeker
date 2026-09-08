@@ -224,6 +224,7 @@ def main() -> int:
         print(f"{name}: {len(datasets[name])} rows, "
               f"{int(datasets[name]['label'].sum())} positives")
 
+    raw_rows: List[Dict[str, object]] = []   # one row per (model, set, pass)
     cols: Dict[str, Dict[str, float]] = {}
     median_cols: List[str] = []   # the seconds_<set> columns, tracked rather than
                                   # pattern-matched so the spread columns added below
@@ -235,6 +236,15 @@ def main() -> int:
                                       repeats=args.repeats, warmup=args.warmup)
         cols[f'APS_{name}'] = scores
         if times:
+            # Keep which pass each timing came from. Repeats are interleaved, so
+            # within one pass every model met the same machine conditions - that
+            # pairing is what lets a later analysis compare two models by their
+            # per-pass ratio, where drift largely cancels, instead of by two
+            # independently-reduced medians, where it does not. Reducing to
+            # quartiles here throws the pairing away irrecoverably.
+            raw_rows += [{'model': m, 'dataset': name, 'pass': k, 'seconds': v}
+                         for m, samples in times.items()
+                         for k, v in enumerate(samples, 1)]
             summaries = {m: summarise_times(s) for m, s in times.items()}
             # One repeat writes just seconds_<set>, so the default run stays
             # column-identical to the files already in results/.
@@ -267,6 +277,10 @@ def main() -> int:
         os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
         table.to_csv(args.output, index_label='model')
         print(f"\nWritten to: {args.output}")
+        if raw_rows:
+            raw_path = args.output.rsplit('.', 1)[0] + '.raw.csv'
+            pd.DataFrame(raw_rows).to_csv(raw_path, index=False)
+            print(f"Per-pass timings: {raw_path}")
 
     return 0
 
