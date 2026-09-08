@@ -14,8 +14,13 @@ __pycache__/
 # --ckpt-dir; the one shipped checkpoint stays tracked.
 *.pt
 !cnn_checkpoints/cnn_branches_mirbind_embed16_restruct.pt
-models_gluon/
+# `models/` matches a directory of that name at any depth, so it also caught
+# models_gluon_catboost/models/. The deployment clone is the one predictor that
+# ships, so it is re-included explicitly - the directory first, because git
+# will not look inside an excluded directory to find a re-included file.
 models/
+!models_gluon_catboost/models/
+!models_gluon_catboost/models/**
 
 # ── Run artefacts ─────────────────────────────────────────────────────────
 *.db
