@@ -128,7 +128,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--npz", type=Path,
-                    default=RESULTS / "shap" / "manakov_test_fambal.shap.npz")
+                    default=RESULTS / "shap" / "manakov_test_fambal_catboost.shap.npz")
     ap.add_argument("--max-points", type=int, default=4000,
                     help="Rows drawn per feature. The full sample is 25,000; "
                          "beyond a few thousand the swarm is solid ink and the "

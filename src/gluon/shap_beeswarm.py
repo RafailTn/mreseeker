@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-TreeSHAP beeswarm for the LightGBM predictor on a stratified sample.
+TreeSHAP beeswarm for a bagged tree predictor on a stratified sample.
+
+Handles both LightGBM and CatBoost bagged models: the shipped default moved from
+LightGBMLarge to CatBoost, and the two libraries differ only in how the
+contributions are requested - both return (n, n_features + 1) with the baseline
+in the trailing column.
 
 Unlike the -explain path in predict_target.py this explains BOTH classes (a beeswarm
 built only from predicted positives shows what drives confident positives, not what
@@ -107,12 +112,28 @@ def _init(boosters):
     _BOOSTERS = boosters
 
 
+def _feature_names(booster) -> list | None:
+    """Column order this booster was fit on, whichever library it comes from."""
+    if hasattr(booster, "feature_name"):            # lightgbm.Booster
+        return list(booster.feature_name())
+    if getattr(booster, "feature_names_", None):    # catboost.CatBoostClassifier
+        return list(booster.feature_names_)
+    return None
+
+
 def _contrib_chunk(args):
-    """SHAP contributions for one row-chunk, summed over folds."""
+    """SHAP contributions for one row-chunk, summed over folds.
+
+    Both libraries return (n, n_features + 1) with the baseline in the trailing
+    column, so the two paths differ only in how they are asked.
+    """
     fold_idx, X = args
     booster = _BOOSTERS[fold_idx]
-    # pred_contrib returns (n, n_features + 1); the trailing column is the baseline.
-    return fold_idx, booster.predict(X, pred_contrib=True, num_threads=1)
+    if hasattr(booster, "feature_name"):
+        return fold_idx, booster.predict(X, pred_contrib=True, num_threads=1)
+    from catboost import Pool                      # noqa: PLC0415
+    return fold_idx, booster.get_feature_importance(
+        Pool(X), type="ShapValues", thread_count=1)
 
 
 def _fair_allocation(available: pd.Series, budget: int) -> pd.Series:
@@ -183,6 +204,10 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", required=True, help="Saved AutoGluon predictor directory")
+    p.add_argument("--model-name", default=None,
+                   help="Model inside the predictor to explain (default: its "
+                        "best). Needed when the best model is a stacked "
+                        "ensemble but a single bagged tree model is wanted.")
     p.add_argument("--data", required=True, help="Feature CSV containing the label column")
     p.add_argument("--out-prefix", required=True,
                    help="Path stem for the .npz matrix, .tsv summary and .png figure")
@@ -205,15 +230,29 @@ def main() -> int:
 
     # -- Model -----------------------------------------------------------------
     predictor = TabularPredictor.load(args.model, require_version_match=False)
-    bag = predictor._trainer.load_model(predictor.model_best)
+    model_name = args.model_name or predictor.model_best
+    if model_name not in predictor.model_names():
+        print(f"'{model_name}' not in this predictor. "
+              f"Available: {predictor.model_names()}", file=sys.stderr)
+        return 1
+    bag = predictor._trainer.load_model(model_name)
     if not (hasattr(bag, "models") and hasattr(bag, "load_child")):
-        print(f"{predictor.model_best} is not a bagged model.", file=sys.stderr)
+        print(f"{model_name} is not a bagged model.", file=sys.stderr)
         return 1
     boosters = [bag.load_child(c).model for c in bag.models]
     if args.folds:
         boosters = boosters[:args.folds]
-    features = boosters[0].feature_name()
-    print(f"Model {predictor.model_best}: {len(boosters)} fold(s), {len(features)} features")
+    features = _feature_names(boosters[0])
+    if features is None:
+        print(f"{model_name} is not a tree model TreeSHAP can walk "
+              f"(LightGBM or CatBoost).", file=sys.stderr)
+        return 1
+    # Summing fold contributions is only valid if the folds share a column order.
+    if any(_feature_names(b) != features for b in boosters):
+        print(f"{model_name}: bagged folds disagree on feature order.",
+              file=sys.stderr)
+        return 1
+    print(f"Model {model_name}: {len(boosters)} fold(s), {len(features)} features")
 
     # -- Data ------------------------------------------------------------------
     print(f"Loading {args.data}")
