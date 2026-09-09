@@ -60,6 +60,9 @@ ORDER = ["Manakov test", "Manakov leftout",
 TRAINED_ON = {"Manakov test", "Manakov leftout"}
 CELL_LINES = {"SAEC", "HCT116"}
 
+# Vertical offset of each model from its row centre.
+DODGE = 0.19
+
 
 def _join(names: list[str]) -> str:
     if len(names) == 1:
@@ -105,7 +108,7 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None) -> None:
     datasets = list(dict.fromkeys(df.dataset))
     ps.apply(9.5)
 
-    height = 0.62 * len(datasets) + (1.25 if bare else 2.65)
+    height = 0.78 * len(datasets) + (1.25 if bare else 2.65)
     fig, ax = plt.subplots(figsize=(12.6, height))
     fig.subplots_adjust(left=0.165, right=0.885, top=1 - 0.35 / height,
                         bottom=(0.62 if bare else 1.55) / height)
@@ -119,18 +122,27 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None) -> None:
 
         # Random baseline for this set: APS of a coin weighted to its prevalence.
         base = (cnn or glu).pos_rate
-        ax.plot([base], [y], "|", ms=13, color=ps.MUTED, mew=1.6, zorder=2)
+        ax.plot([base, base], [y - DODGE - 0.12, y + DODGE + 0.12], "-",
+                color=ps.MUTED, lw=1.6, zorder=2)
 
-        if cnn is not None and glu is not None:
-            ax.plot([glu.aps, cnn.aps], [y, y], "-", color=ps.GRID, lw=3.0,
-                    zorder=1, solid_capstyle="round")
-        for r, colour in ((glu, ps.ACCENT_GLUON), (cnn, ps.ACCENT_CNN)):
+        # The two models get their own sub-row. Sharing one line made the
+        # interval, the connector and the two markers a single stripe with no
+        # readable endpoints - on the small sets the two intervals overlap each
+        # other as well, which is exactly where the reader needs to see them.
+        for r, colour, dy in ((cnn, ps.ACCENT_CNN, DODGE),
+                              (glu, ps.ACCENT_GLUON, -DODGE)):
             if r is None:
                 continue
+            yy = y + dy
             if pd.notna(r.ci_lo):
-                ax.plot([r.ci_lo, r.ci_hi], [y, y], "-", color=colour, lw=1.6,
-                        alpha=0.55, zorder=3, solid_capstyle="butt")
-            ax.plot([r.aps], [y], "o", ms=10, mfc=colour, mec=ps.SURFACE,
+                # Capped bar: the caps are what make the extent legible when two
+                # intervals overlap, which a plain line cannot show.
+                ax.plot([r.ci_lo, r.ci_hi], [yy, yy], "-", color=colour, lw=1.4,
+                        alpha=0.9, zorder=3, solid_capstyle="butt")
+                for x_end in (r.ci_lo, r.ci_hi):
+                    ax.plot([x_end, x_end], [yy - 0.075, yy + 0.075], "-",
+                            color=colour, lw=1.4, alpha=0.9, zorder=3)
+            ax.plot([r.aps], [yy], "o", ms=9, mfc=colour, mec=ps.SURFACE,
                     mew=1.8, zorder=5)
 
         if cnn is not None and glu is not None:
@@ -171,10 +183,12 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None) -> None:
     if not bare:
         legend = (
             "Average precision of both models on the same rows of each evaluation "
-            "set. Bars are 95% percentile bootstrap intervals over rows; the grey "
-            "tick is the set's positive rate, which is the average precision a "
-            "random classifier achieves there, so the distance above it is the "
-            "signal. \u0394 is CNN minus feature model. " + describe(datasets))
+            "set, one sub-row per model. Capped bars are 95% percentile bootstrap "
+            "intervals over rows; on the largest sets the interval is narrower "
+            "than the marker, so only the caps show. The grey line is the set's "
+            "positive rate, which is the average precision a random classifier "
+            "achieves there, so the distance to the right of it is the signal. "
+            "\u0394 is CNN minus feature model. " + describe(datasets))
         fig.text(0.030, 0.20 / height,
                  "\n".join(textwrap.wrap(legend, width=176)),
                  fontsize=8.5, color=ps.INK_2, va="bottom", linespacing=1.5)
