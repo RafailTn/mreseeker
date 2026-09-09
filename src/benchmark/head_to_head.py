@@ -43,6 +43,12 @@ from sklearn.metrics import average_precision_score
 PROB_COLS = ["interaction_probability", "prob", "proba", "score"]
 LABEL_COL = "label"
 
+# Series names written to the output and read back by the figure. Named after
+# what the model is rather than which library it happens to use, so a change of
+# shipped algorithm does not silently invalidate an existing results file.
+CNN_LABEL = "sequence CNN"
+GLUON_LABEL = "IntaRNA features + CatBoost"
+
 
 def _read(path: Path) -> pd.DataFrame:
     sep = "\t" if path.suffix in (".tsv", ".txt") else ","
@@ -148,8 +154,7 @@ def main() -> int:
         labels[n] = Path(pth)
 
     rows: List[dict] = []
-    for model, specs in (("sequence CNN", args.cnn),
-                         ("IntaRNA features + LightGBM", args.gluon)):
+    for model, specs in ((CNN_LABEL, args.cnn), (GLUON_LABEL, args.gluon)):
         for spec in specs:
             name, y, s = load(spec, labels)
             point, lo, hi = aps_ci(y, s, args.bootstrap)
@@ -168,8 +173,7 @@ def main() -> int:
     # The comparison the poster is actually making, where both models ran.
     both = out.pivot_table(index="dataset", columns="model", values="aps")
     if both.shape[1] == 2:
-        both["delta (CNN - features)"] = (
-            both["sequence CNN"] - both["IntaRNA features + LightGBM"])
+        both["delta (CNN - features)"] = both[CNN_LABEL] - both[GLUON_LABEL]
         print("\n" + both.to_string(float_format=lambda v: f"{v:+.4f}"))
     return 0
 

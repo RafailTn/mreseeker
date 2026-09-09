@@ -61,6 +61,14 @@ class IntaRNAInteraction:
     energy_norm: float = 0.0    
     energy_hybrid_norm: float = 0.0    
     p_e: float = 0.0    
+    # From merge_intarna.py, carried through untouched rather than recomputed here.
+    # `p_duplex` is the Boltzmann weight of THIS duplex within the interaction ensemble
+    # (exp(-(E - Eall)/RT)), not IntaRNA's site-level `P_E`; `energy_source` is 'ensemble'
+    # or 'mfe_only' depending on whether the ensemble run found the pair at all. Both
+    # default to "unknown" (NaN / empty) rather than to a value, so a run against raw
+    # IntaRNA output - which has neither column - stays distinguishable from a merged one.
+    p_duplex: float = float('nan')
+    energy_source: str = ''
     # Scoring fields
     priority_score: float = 0.0
     total_matches: int = 0
@@ -600,6 +608,10 @@ def parse_intarna_csv(filepath: str, verbose: bool = False) -> Dict[int, List[In
                 energy_norm = float(row.get('Energy_norm', 0)) if row.get('Energy_norm') else 0.0
                 energy_hybrid_norm = float(row.get('Energy_hybrid_norm', 0)) if row.get('Energy_hybrid_norm') else 0.0
                 p_e = float(row.get('P_E', 0)) if row.get('P_E') else 0.0
+                # NaN (not 0.0) when absent: `P_duplex` of 0 would mean "this duplex has
+                # no weight in the ensemble", which is a claim, not a missing value.
+                p_duplex = float(row['P_duplex']) if row.get('P_duplex') else float('nan')
+                energy_source = row.get('energy_source', '') or ''
                 
                 interaction = IntaRNAInteraction(
                     target_id=row.get('id1', row.get('target_id', '')),
@@ -621,7 +633,9 @@ def parse_intarna_csv(filepath: str, verbose: bool = False) -> Dict[int, List[In
                     energy_total_total=energy_total_total, 
                     energy_norm=energy_norm, 
                     energy_hybrid_norm=energy_hybrid_norm, 
-                    p_e=p_e 
+                    p_e=p_e,
+                    p_duplex=p_duplex,
+                    energy_source=energy_source,
                 )
                 
                 if pair_idx not in pair_interactions:
@@ -652,6 +666,13 @@ def write_best_results_tsv(results: List[PairResult], output_file: str):
     Undefined numeric values are written as the literal `nan`, not `NA`: that is what
     merge_intarna's `na_rep='nan'` round-trips and what feature_extraction's
     safe_float parses back to NaN. `NA` would be coerced to 0.0 there.
+
+    `P_duplex` and `energy_source` are merge_intarna's, not this script's, and are
+    re-emitted here purely so they survive to the feature CSV: the header is the only
+    thing that decides what leaves this file (the writer ignores extras), so a column
+    missing from it is dropped silently, and `energy_source` in particular is the audit
+    trail for the pairs where the ensemble run found nothing -
+    `feature_extraction.py --fallback-report` has no other source for it.
     """
     headers = [
         'pair_index',
@@ -661,7 +682,8 @@ def write_best_results_tsv(results: List[PairResult], output_file: str):
         'start_query', 'end_query',
         'subseq_dp', 'hybrid_dp',
         'E', 'E_hybrid', 'ED_target', 'ED_query',
-        'E_total', 'Eall', 'Eall1', 'Eall2', 'Ealltotal','P_E',
+        'E_total', 'Eall', 'Eall1', 'Eall2', 'Ealltotal', 'P_E', 'P_duplex',
+        'energy_source',
         'Energy_norm', 'Energy_hybrid_norm',
         'priority_score', 'total_matches', 'seed_matches',
         'gu_wobbles_seed', 'gu_wobbles_other',
@@ -716,6 +738,8 @@ def write_best_results_tsv(results: List[PairResult], output_file: str):
                     'Eall2': f"{inter.energy_all2:.2f}",
                     'Ealltotal': f"{inter.energy_all_total:.2f}",
                     'P_E': f"{inter.p_e:.2f}",
+                    'P_duplex': fmt(inter.p_duplex),
+                    'energy_source': inter.energy_source or 'nan',
                     'Energy_norm': f"{inter.energy_norm:.2f}",
                     'Energy_hybrid_norm': f"{inter.energy_hybrid_norm:.2f}",
                     'priority_score': f"{inter.priority_score:.2f}",

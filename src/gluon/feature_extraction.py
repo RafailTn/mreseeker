@@ -1537,7 +1537,7 @@ def main():
             'mir_fam': v7_row.get('noncodingRNA_fam', ''),
             'label': v7_row.get('label', 0),
             # 'mfe_only' where the ensemble run found no interaction at all for this pair,
-            # so Eall/Eall1/Eall2/Ealltotal (and E_total/P_E, derived from them) are NaN.
+            # so Eall/Eall1/Eall2/Ealltotal (and E_total/P_duplex, derived from them) are NaN.
             # Reported, never fed to the model.
             'energy_source': row.get('energy_source', 'ensemble'),
         })
