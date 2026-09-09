@@ -81,12 +81,21 @@ pixi run --manifest-path dependencies/gluon/pixi.toml python3 src/gluon/predict_
 
 Output is a TSV with `interaction_probability` and a thresholded `prediction`.
 
-Scoring defaults to the single bagged LightGBM (`LightGBMLarge_BAG_L1`) rather than the
-stacked weighted ensemble: it is ~10x faster at inference, far more tractable to
-explain, and performs near-identically — 0.8443 vs 0.8465 APS on the Manakov v7 test
-set, 0.8388 vs 0.8403 on leftout. The full stack is still in `models_gluon` — pass
-`model="WeightedEnsemble_L3"` to `predict_proba` to use it. `models_gluon_lgbm` is a
-138 MB deployment clone of just the default model, with bit-identical output to the
+Scoring defaults to the single bagged CatBoost (`CatBoost_BAG_L1`) rather than the
+stacked weighted ensemble: it is far cheaper at inference, far more tractable to
+explain, and performs near-identically — 0.8430 vs 0.8465 APS on the Manakov v7 test
+set, 0.8382 vs 0.8403 on leftout. Reaching the top of the Pareto front (a different
+model in each set) costs +0.0041 APS for 214x the inference time on test, +0.0022 for
+49x on leftout.
+
+The default was `LightGBMLarge_BAG_L1` until a 25-model timing run (5 repeats, warmup)
+showed CatBoost is **23x faster for 0.0013 APS less**, and that LightGBMLarge is
+dominated outright on the leftout set. Both are gradient-boosted trees, so the
+TreeSHAP explanation path is unchanged.
+
+The full stack is still in `models_gluon` — pass `model="WeightedEnsemble_L3"` to
+`predict_proba` to use it. `models_gluon_catboost` is a 27 MB deployment clone of just
+the default model, built with `clone_for_deployment` and verified bit-identical to the
 full 6.8 GB directory.
 
 **The two FASTAs are paired positionally, not all-vs-all** — record *i* of
@@ -116,11 +125,14 @@ z-scores `NaN` with a warning instead.
 
 **Explanations.** Add `-explain` for SHAP: a global importance table, a
 per-sample table, and top-N driver columns added to the main output. Because the
-default model is LightGBM, this uses exact TreeSHAP and the values are in
+default model is a bagged tree model, this uses exact TreeSHAP and the values are in
 **log-odds** — roughly 20x faster per row than the sampling explainer, with no
-`nsamples` or background set to choose. A non-LightGBM model falls back to the
-approximate `KernelExplainer`, whose values are in probability instead; the units are
-printed at the top of each run.
+`nsamples` or background set to choose. Contributions reconstruct the model's raw
+margin to floating-point precision (verified at 1e-14), so the attributions are exact
+rather than approximate. Both LightGBM and CatBoost bagged models take this path;
+anything else — a stacked ensemble mixing in neural nets has no tree structure to walk
+— falls back to the approximate `KernelExplainer`, whose values are in probability
+instead. The units are printed at the top of each run.
 
 ### Feature extraction on its own
 
@@ -248,11 +260,14 @@ src/cnn/              CNN inference (predict_cnn.py)
 src/training/gluon/   AutoGluon training, feature sets, feature selection
 src/training/cnn/     CNN model definition, training, Optuna search
 src/eqtl_analysis/    GTEx eQTL scoring with the CNN, PIP separation, miRNA expression ranking
+src/benchmark/        model-vs-model scoring, evaluation-set overlap, pipeline timing
+src/figures/          poster panels; poster_style.py holds the shared palette
 data/                 shuffle-background panel + the selected-feature JSON
 cnn_checkpoints/      shipped CNN checkpoint
-models_gluon/         AutoGluon predictor directory, defaults to LightGBMLarge_BAG_L1
+models_gluon/         AutoGluon predictor directory, defaults to CatBoost_BAG_L1
                       (not in git — download separately)
-models_gluon_lgbm/    deployment clone of that default model alone (not in git)
+models_gluon_catboost/
+                      deployment clone of that default model alone, 27 MB
 dependencies/         one Pixi manifest per environment
 ```
 
