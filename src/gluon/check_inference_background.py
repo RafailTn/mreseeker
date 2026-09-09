@@ -26,12 +26,12 @@ predict on contributes its own E through the normal extraction pass, not here.
 Usage (report only, exits non-zero if any miRNA is missing):
     python check_inference_background.py \
         --input   data/inference_pairs.tsv --mirna-column noncodingRNA \
-        --background data/mirna_background.tsv
+        --background background/mirna_background.tsv
 
 Usage (auto-extend the table in place, then continue the pipeline):
     python check_inference_background.py \
         --input   data/inference.fa \
-        --background data/mirna_background.tsv \
+        --background background/mirna_background.tsv \
         --auto-extend
 """
 
@@ -39,6 +39,7 @@ import os
 import sys
 import csv
 import argparse
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # background_for_mirna / parse_fasta_seqs / normalise live beside this file; importing
@@ -47,6 +48,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from shuffle_background import (  # noqa: E402
     background_for_mirna, parse_fasta_seqs, normalise, BACKGROUND_COLS,
 )
+
+# Repo-anchored so the defaults resolve from any working directory.
+_BACKGROUND_DIR = Path(__file__).resolve().parents[2] / "background"
+_BACKGROUND_TSV = _BACKGROUND_DIR / "mirna_background.tsv"
+_BACKGROUND_PANEL = _BACKGROUND_DIR / "mirna_background.fa"
 
 # Column names that plausibly hold the miRNA sequence, tried in order when the input is a
 # table and --mirna-column was not given.
@@ -135,12 +141,14 @@ def main():
     parser.add_argument('--mirna-column', default=None,
                         help=f'miRNA-sequence column when --input is a table (tried in '
                              f'order if omitted: {DEFAULT_MIRNA_COLUMNS})')
-    parser.add_argument('--background', required=True,
-                        help='the mirna_background.tsv to check against / extend')
-    parser.add_argument('--panel-fasta', default=None,
-                        help='the frozen panel the table was built on (default: '
-                             '<background>_panel.fa, as shuffle_background.py writes it). '
-                             'Required for --auto-extend.')
+    parser.add_argument('--background', default=str(_BACKGROUND_TSV),
+                        help=f'the mirna_background.tsv to check against / extend '
+                             f'(default: {_BACKGROUND_TSV})')
+    parser.add_argument('--panel-fasta', default=str(_BACKGROUND_PANEL),
+                        help=f'the frozen panel the table was built on '
+                             f'(default: {_BACKGROUND_PANEL}). Required for '
+                             f'--auto-extend: new miRNAs must be scored against the '
+                             f'SAME panel the table was built on.')
     parser.add_argument('--auto-extend', action='store_true',
                         help='score missing miRNAs against the frozen panel and append '
                              'them to --background in place')

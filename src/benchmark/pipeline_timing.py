@@ -30,8 +30,8 @@ same script runs twice, once in each environment, writing one CSV each:
         src/benchmark/pipeline_timing.py --pipeline gluon \\
         --mre-fasta mre.fa --mirna-fasta mirna.fa --conservation-tsv sites.tsv \\
         --gluon-model models_gluon_lgbm \\
-        --mirna-background data/mirna_background.tsv \\
-        --panel-fasta data/mirna_background.fa \\
+        --mirna-background background/mirna_background.tsv \\
+        --panel-fasta background/mirna_background.fa \\
         --threads 8 --repeats 3 -o results/timing_gluon.csv
 
     pixi run --manifest-path dependencies/cnn/pixi.toml python3 \\

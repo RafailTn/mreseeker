@@ -36,7 +36,7 @@ Usage:
     # the normal path - training, selection and inference all use this
     python feature_extraction.py --intarna best.tsv --mre-fasta mre.fa \
         --mirna-fasta mirna.fa --v7 data/..._train_v7.tsv \
-        --mirna-background data/mirna_background.tsv \
+        --mirna-background background/mirna_background.tsv \
         --output train.csv
 
 """
@@ -47,6 +47,7 @@ import sys
 import csv
 import json
 import argparse
+from pathlib import Path as _Path
 import warnings
 import multiprocessing as mp
 from collections import Counter
@@ -113,6 +114,10 @@ V7_PASSTHROUGH = [
 # ============================================================================
 # IO
 # ============================================================================
+
+# Repo-anchored so the default resolves from any working directory.
+_BACKGROUND_TSV = _Path(__file__).resolve().parents[2] / 'background' / 'mirna_background.tsv'
+
 
 def parse_fasta(file_path):
     sequences = []
@@ -1434,7 +1439,7 @@ def main():
                         help='TSV listing, by chimeric sequence, the pairs for which the '
                              'ensemble run found no interaction, so the partition-function '
                              'energies are NaN (energy_source == "mfe_only")')
-    parser.add_argument('--mirna-background', default=None,
+    parser.add_argument('--mirna-background', default=str(_BACKGROUND_TSV),
                         help='per-miRNA shuffled-target background table from '
                              'src/shuffle_background.py. Without it the four '
                              'shuffle-z-score features are NaN.')

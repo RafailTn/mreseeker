@@ -71,7 +71,7 @@ Usage:
     python shuffle_background.py \
         --mirna-fasta mirna.fa \
         --target-source data/AGO2_eCLIP_Manakov2022_train_v7.tsv \
-        --output data/mirna_background.tsv \
+        --output background/mirna_background.tsv \
         --panel-size 100 --threads 8
 
 The output is consumed by `feature_extraction.py --mirna-background`.

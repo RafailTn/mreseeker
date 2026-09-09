@@ -18,6 +18,12 @@ _BW_LOCAL = "hg38.phastCons470way.bw"
 
 # Script directory — all pipeline helpers are expected to sit next to this file
 _HERE = Path(__file__).parent
+# The shuffle-background table and the frozen panel it was built on live
+# together in background/. Anchored to the repo rather than the working
+# directory so the defaults resolve wherever the script is invoked from.
+_BACKGROUND_DIR = _HERE.parent.parent / "background"
+_BACKGROUND_TSV = _BACKGROUND_DIR / "mirna_background.tsv"
+_BACKGROUND_PANEL = _BACKGROUND_DIR / "mirna_background.fa"
 
 
 # =============================================================================
@@ -406,18 +412,20 @@ def main() -> int:
     parser.add_argument("-o", default="./results.tsv",
                         help="Output TSV file (default: ./results.tsv)")
     # -- Shuffle background (z-score features) ---------------------------------
-    parser.add_argument("-mirna_background",
-                        help="mirna_background.tsv so the four shuffle z-score features "
-                             "(E_z_mirna, E_hybrid_z_mirna, E_bg_mean_mirna, "
-                             "E_bg_sd_mirna) get filled. WITHOUT it they are NaN, which "
-                             "matches the model ONLY if it was trained the same way. "
-                             "Query miRNAs missing from the table are scored against its "
-                             "frozen panel by default (disable with -no_extend_background).")
-    parser.add_argument("-panel_fasta",
-                        help="Frozen panel the background table was built on "
-                             "(default: <mirna_background>_panel.fa). Any query miRNA "
-                             "missing from the table is scored on THIS panel, so its "
-                             "z-scores stay comparable to the trained ones.")
+    parser.add_argument("-mirna_background", default=str(_BACKGROUND_TSV),
+                        help=f"mirna_background.tsv so the four shuffle z-score features "
+                             f"(E_z_mirna, E_hybrid_z_mirna, E_bg_mean_mirna, "
+                             f"E_bg_sd_mirna) get filled (default: {_BACKGROUND_TSV}). "
+                             f"Pass an empty string to skip it, leaving those features "
+                             f"NaN - which matches the model ONLY if it was trained the "
+                             f"same way. Query miRNAs missing from the table are scored "
+                             f"against its frozen panel by default (disable with "
+                             f"-no_extend_background).")
+    parser.add_argument("-panel_fasta", default=str(_BACKGROUND_PANEL),
+                        help=f"Frozen panel the background table was built on "
+                             f"(default: {_BACKGROUND_PANEL}). Any query miRNA missing "
+                             f"from the table is scored on THIS panel, so its z-scores "
+                             f"stay comparable to the trained ones.")
     parser.add_argument("-no_extend_background", action="store_true",
                         help="Do not score query miRNAs missing from the background; "
                              "leave their z-scores NaN and only warn.")

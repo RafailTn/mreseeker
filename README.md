@@ -73,8 +73,8 @@ pixi run --manifest-path dependencies/gluon/pixi.toml python3 src/gluon/predict_
     -query_fasta   mirna.fa \
     -conservation_tsv sites.tsv \
     -model         models_gluon \
-    -mirna_background data/mirna_background.tsv \
-    -panel_fasta   data/mirna_background.fa \
+    -mirna_background background/mirna_background.tsv \
+    -panel_fasta   background/mirna_background.fa \
     -o             results.tsv \
     -threads 8
 ```
@@ -119,7 +119,7 @@ automatically. That is a multi-GB fetch — pass one of the two flags to avoid i
 panel. Without `-mirna_background` they are `NaN`, which is off-distribution for
 a model trained with them filled. Any query miRNA missing from the table is
 scored against the frozen panel and **appended to
-`data/mirna_background.tsv` in place** — point the flag at a copy if you don't
+`background/mirna_background.tsv` in place** — point the flag at a copy if you don't
 want the tracked file modified, or pass `-no_extend_background` to leave the
 z-scores `NaN` with a warning instead.
 

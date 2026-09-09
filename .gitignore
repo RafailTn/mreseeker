@@ -31,10 +31,8 @@ best_hparams_mirbind.json
 *.cnncache.npz
 
 # ── Data ──────────────────────────────────────────────────────────────────
-# The v7 interaction tables run to several GB, so data/ is ignored by
-# default; the small background files are tracked explicitly.
-!data/mirna_background.fa
-!data/mirna_background.tsv
+# The shuffle-background table and its frozen panel moved to background/, so
+# the scripts can default to them; nothing under data/ needs re-including.
 
 # ── Results ───────────────────────────────────────────────────────────────
 results/
