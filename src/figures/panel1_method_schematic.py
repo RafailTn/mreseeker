@@ -274,7 +274,7 @@ def main():
     draw_features(ax, 38.0, B1, ORANGE)
     arrow(ax, 58.6, MID_B, 59.4, MID_B, ORANGE)
 
-    stage(ax, 60.0, 78.0, B0, B1, "CatBoost_BAG_L1",
+    stage(ax, 60.0, 78.0, B0, B1, "CatBoost BAG L1",
           [f"{n_folds}-fold bagged", "the shipped default of 25",
            "AutoGluon candidates", "27 MB deployment clone"],
           ORANGE, ps.GLUON_FILL)
