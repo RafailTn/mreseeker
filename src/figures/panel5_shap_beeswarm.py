@@ -138,6 +138,10 @@ def main() -> None:
     ap.add_argument("--bare", action="store_true",
                     help="Drop the figure legend. Use for the poster, where the "
                          "caption under the panel is the explanatory text.")
+    ap.add_argument("--narrow", action="store_true",
+                    help="Author for a half-width poster slot: 6.1 in wide, bare, "
+                         "without the family column, so text matches the "
+                         "full-width panels once placed.")
     ap.add_argument("--name", default="panel5_shap_beeswarm")
     args = ap.parse_args()
 
@@ -159,12 +163,20 @@ def main() -> None:
     # Height tracks the row count so a shorter --top keeps the same row pitch
     # instead of stretching a few rows over a full-height figure. The constant
     # is the fixed chrome: axis, colour key and legend.
+    if args.narrow:
+        args.bare = True
     chrome = 1.35 if args.bare else 2.60
-    fig, ax = plt.subplots(figsize=(12.2, chrome + 0.36 * len(order)))
+    pitch = 0.30 if args.narrow else 0.36
+    width = 6.1 if args.narrow else 12.2
+    fig, ax = plt.subplots(figsize=(width, chrome + pitch * len(order)))
     # Wide left margin: the row labels carry two columns, the family tag in the
-    # outer gutter and the feature name against the axis.
+    # outer gutter and the feature name against the axis. Narrow mode keeps
+    # only the feature name, so the plot is not squeezed to a sliver.
     h = fig.get_figheight()
-    fig.subplots_adjust(left=0.285, right=0.885, top=1 - 0.245 / h,
+    left = 2.30 / width if args.narrow else 0.285
+    fig.subplots_adjust(left=left,
+                        right=1 - (1.02 / width if args.narrow else 0.115),
+                        top=1 - 0.245 / h,
                         bottom=(0.90 if args.bare else 1.52) / h)
 
     ax.axvline(0.0, color=ps.MUTED, lw=1.0, zorder=2)
@@ -189,28 +201,32 @@ def main() -> None:
         y0 = len(order) - 1 - row
         # Family tag in the left gutter, in axes-independent figure space so it
         # never collides with the longest feature name.
-        ax.text(GUTTER, y0, FEATURE_GROUP.get(names[fi], ""),
-                transform=ax.get_yaxis_transform(), ha="left", va="center",
-                fontsize=8.5, color=ps.MUTED)
+        if not args.narrow:
+            ax.text(GUTTER, y0, FEATURE_GROUP.get(names[fi], ""),
+                    transform=ax.get_yaxis_transform(), ha="left", va="center",
+                    fontsize=8.5, color=ps.MUTED)
         ax.text(1.012, y0, f"{mean_abs[fi]:.3f}",
                 transform=ax.get_yaxis_transform(), ha="left", va="center",
                 fontsize=8.5, color=ps.INK_2)
     ax.text(1.012, len(order) - 0.35, "mean |SHAP|",
             transform=ax.get_yaxis_transform(), ha="left", va="center",
             fontsize=8.5, fontweight="bold", color=ps.INK)
-    ax.text(GUTTER, len(order) - 0.35, "family",
-            transform=ax.get_yaxis_transform(), ha="left", va="center",
-            fontsize=8.5, fontweight="bold", color=ps.INK)
+    if not args.narrow:
+        ax.text(GUTTER, len(order) - 0.35, "family",
+                transform=ax.get_yaxis_transform(), ha="left", va="center",
+                fontsize=8.5, fontweight="bold", color=ps.INK)
 
-    ax.set_xlabel("SHAP value  (log-odds contribution to P(bind))")
+    ax.set_xlabel("SHAP value (log-odds)" if args.narrow
+                  else "SHAP value  (log-odds contribution to P(bind))")
     ax.tick_params(axis="y", length=0)
     ps.despine(ax, keep=("bottom",))
     ax.grid(False)
 
     # Colour key: a gradient strip, since a categorical legend cannot show a
     # continuous encoding honestly.
-    cax = fig.add_axes([0.285, (0.30 if args.bare else 0.80) / h,
-                        0.115, 0.10 / h])
+    strip_in = 0.62 if args.narrow else 1.40
+    cax = fig.add_axes([left, (0.30 if args.bare else 0.80) / h,
+                        strip_in / width, 0.10 / h])
     cax.imshow(np.linspace(0, 1, 256).reshape(1, -1), aspect="auto",
                cmap=VALUE_RAMP)
     cax.set_xticks([]); cax.set_yticks([])
@@ -224,7 +240,9 @@ def main() -> None:
     # Bare mode has no room above the strip before the x label, so the key's
     # own label goes inline after "high" instead of over it.
     if args.bare:
-        cax.text(1.30, 0.5, "feature value", transform=cax.transAxes,
+        # Offset in inches past the strip, converted to strip units, so the
+        # label clears "high" whatever width the strip is drawn at.
+        cax.text(1.0 + 0.42 / strip_in, 0.5, "feature value", transform=cax.transAxes,
                  ha="left", va="center", fontsize=8.5, color=ps.INK_2)
     else:
         cax.text(0.5, 2.6, "feature value", transform=cax.transAxes,

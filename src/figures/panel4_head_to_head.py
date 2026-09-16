@@ -103,14 +103,26 @@ def load(path: Path) -> pd.DataFrame:
     return df.sort_values("_rank")
 
 
-def main(bare: bool = False, src: Path = SRC, name: str | None = None) -> None:
+def main(bare: bool = False, src: Path = SRC, name: str | None = None,
+         narrow: bool = False) -> None:
+    """`narrow` authors the panel for a half-width poster slot: same point sizes,
+    half the width, so on the poster its text matches the full-width panels
+    instead of shrinking to half their size."""
     df = load(src)
     datasets = list(dict.fromkeys(df.dataset))
     ps.apply(9.5)
 
     height = 0.78 * len(datasets) + (1.25 if bare else 2.65)
-    fig, ax = plt.subplots(figsize=(12.6, height))
-    fig.subplots_adjust(left=0.165, right=0.885, top=1 - 0.35 / height,
+    width = 6.1 if narrow else 12.6
+    if narrow:
+        # Two legend rows instead of one, so more headroom above the axes.
+        height = 0.52 * len(datasets) + (1.55 if bare else 2.85)
+    fig, ax = plt.subplots(figsize=(width, height))
+    # Margins in inches, converted: the tick labels and the delta column need
+    # a fixed amount of room whatever the figure width.
+    fig.subplots_adjust(left=1.30 / width if narrow else 0.165,
+                        right=1 - (0.62 / width if narrow else 0.115),
+                        top=1 - (0.70 if narrow else 0.35) / height,
                         bottom=(0.62 if bare else 1.55) / height)
 
     counts: dict[str, int] = {}
@@ -177,7 +189,8 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None) -> None:
                    label="random baseline (= positive rate)"),
     ]
     ax.legend(handles=handles, loc="lower left", bbox_to_anchor=(0.0, 1.005),
-              ncol=3, frameon=False, labelcolor=ps.INK_2, handletextpad=0.5,
+              ncol=2 if narrow else 3, frameon=False, labelcolor=ps.INK_2,
+              handletextpad=0.5,
               columnspacing=1.8)
 
     if not bare:
@@ -213,6 +226,8 @@ if __name__ == "__main__":
     ap.add_argument("--csv", type=Path, default=SRC)
     ap.add_argument("--bare", action="store_true",
                     help="Drop the legend paragraph, for the poster.")
+    ap.add_argument("--narrow", action="store_true",
+                    help="Author for a half-width poster slot (6.1 in wide).")
     ap.add_argument("--name", default=None)
     a = ap.parse_args()
-    main(bare=a.bare, src=a.csv, name=a.name)
+    main(bare=a.bare, src=a.csv, name=a.name, narrow=a.narrow)
