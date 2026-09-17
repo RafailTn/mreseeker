@@ -118,22 +118,29 @@ def icon_matrix(fig, ax_host, x0, x1, y0, y1, pair):
 
 
 def icon_conv_stack(ax, x0, x1, y0, y1, n_blocks):
-    """Feature maps shrinking block by block, drawn with a little depth."""
+    """Feature maps shrinking block by block, drawn with a little depth.
+
+    Maps are spaced by the gap between them, not by their left edges: evenly
+    spaced left edges with shrinking widths would leave the first maps touching
+    and the gaps widening to the right.
+    """
     cy = (y0 + y1) / 2
-    sizes = np.linspace(1.18, 0.34, 5)
-    xs = np.linspace(x0 + 0.25, x1 - 0.75, 5)
+    depth = 0.10                       # back-layer offset, part of each map's width
+    sizes = np.linspace(1.05, 0.30, 5)
+    widths = sizes * 0.62 + depth
+    left, right = x0 + 0.15, x1 - 0.15
+    gap = (right - left - widths.sum()) / (len(sizes) - 1)
+    xs = left + np.concatenate([[0.0], np.cumsum(widths[:-1] + gap)])
     shades = ps.BLUE_RAMP[2:7]
     for x, s, shade in zip(xs, sizes, shades):
-        for k, dx in enumerate((0.10, 0.05, 0.0)):
+        for k, dx in enumerate((depth, depth / 2, 0.0)):
             ax.add_patch(Rectangle((x + dx, cy - s / 2 + dx), s * 0.62, s,
                                    facecolor=shade, edgecolor=BLUE, lw=0.9,
                                    alpha=1.0 if k == 2 else 0.55, zorder=3 + k))
-    # From the right edge of each map (front face plus its depth offset) to the
-    # left edge of the next, so no arrow is drawn across a map.
-    for xa, sa, xb in zip(xs[:-1], sizes[:-1], xs[1:]):
-        start = xa + 0.10 + sa * 0.62 + 0.04
-        if xb - 0.04 > start + 0.06:
-            arrow(ax, (start, cy), (xb - 0.04, cy), BLUE)
+    # One arrow per gap, the same length each time, centred in the gap.
+    pad = 0.05
+    for xa, wa in zip(xs[:-1], widths[:-1]):
+        arrow(ax, (xa + wa + pad, cy), (xa + wa + gap - pad, cy), BLUE)
     ax.text(x1 - 0.05, y0 + 0.02, f"× {n_blocks}", ha="right", va="bottom",
             fontsize=10.5, fontweight="bold", color=BLUE, zorder=6)
 
