@@ -199,14 +199,12 @@ def main() -> None:
         h.text = text
 
     CAP = 1.70                              # caption size, ~19 pt at A0
+    CAP_GAP = 1.8                           # figure-to-caption gap
 
-    # -- introduction -----------------------------------------------------------
+    # -- introduction: one column across the full card --------------------------
     text = INTRO.read_text(encoding="utf-8").strip()
-    col_w = (FULL_W - 2 * TPAD - TCOL_GAP) / 2
-    lines = wrap(text, col_w, BODY)
-    half = (len(lines) + 1) // 2
-    cols = [lines[:half], lines[half:]]
-    intro_h = TPAD + HEAD + 2.6 + half * BODY * LEAD + TPAD - 0.6
+    intro_lines = wrap(text, FULL_W - 2 * TPAD, BODY)
+    intro_h = TPAD + HEAD + 2.6 + len(intro_lines) * BODY * LEAD + TPAD - 0.6
 
     # -- shadow -----------------------------------------------------------------
     f = etree.SubElement(defs, N("filter"), id="cardShadow", x="-10%", y="-10%",
@@ -227,27 +225,38 @@ def main() -> None:
                          ry=str(RADIUS),
                          style="fill:#ffffff;stroke:none;filter:url(#cardShadow)")
 
+    def caption_lines(key, width):
+        return wrap(pt.CAPTIONS[key], width - 2 * TPAD, CAP)
+
     def fig_card_h(key, width, scale=1.0):
-        """Card height for a figure drawn at `scale` of the card's inner width,
-        with its caption wrapped to the full inner width below it."""
+        """Natural card height: figure at `scale` of the inner width, a fixed
+        gap, then the caption, all inside the card padding."""
         _, pw, ph = panels[key]
         inner = width - 2 * PAD
         fig_h = inner * scale * ph / pw
-        cap = wrap(pt.CAPTIONS[key], inner - 2 * 1.2, CAP)
-        return PAD + fig_h + 1.8 + len(cap) * CAP * LEAD + PAD, fig_h, cap
+        cap = caption_lines(key, width)
+        return PAD + fig_h + CAP_GAP + len(cap) * CAP * LEAD + TPAD * 0.7
 
-    def place_fig(key, x, y, width, scale=1.0):
-        h, fig_h, cap = fig_card_h(key, width, scale)
-        card(f"card{key}", x, y, width, h)
-        g, pw, _ = panels[key]
+    def place_fig(key, x, y, width, height, scale):
+        """Card of exactly `height`. The caption sits on the card's bottom inset,
+        so captions in cards whose bottoms align also align; the figure is
+        centred in the space left above it."""
+        card(f"card{key}", x, y, width, height)
+        g, pw, ph = panels[key]
         inner = width - 2 * PAD
-        s = inner * scale / pw
-        fx = x + PAD + inner * (1 - scale) / 2
-        g.set("transform", f"matrix({s:.8f},0,0,{s:.8f},{fx:.4f},{y + PAD:.4f})")
+        fig_w = inner * scale
+        fig_h = fig_w * ph / pw
+        cap = caption_lines(key, width)
+        cap_top = y + height - TPAD * 0.7 - len(cap) * CAP * LEAD
+        free_top, free_bot = y + PAD, cap_top - CAP_GAP
+        fy = free_top + (free_bot - free_top - fig_h) / 2
+        fx = x + PAD + (inner - fig_w) / 2
+        s_ = fig_w / pw
+        g.set("transform", f"matrix({s_:.8f},0,0,{s_:.8f},{fx:.4f},{fy:.4f})")
         layer.append(g)
-        put_lines(f"cap{key}", cap, x + PAD + 1.2, y + PAD + fig_h + 1.8 + CAP * 0.95,
-                  CAP, colour="#3d3b37")
-        return h
+        put_lines(f"cap{key}", cap, x + TPAD, cap_top + CAP * 0.95, CAP,
+                  colour="#3d3b37")
+        return fy
 
     def text_card_h(body, width):
         n = len(wrap_rich(body, width - 2 * TPAD, BODY))
@@ -281,63 +290,57 @@ def main() -> None:
             put_lines(f"{tid}Body", ["[text awaiting approval]"], x + TPAD, first,
                       BODY, colour="#8a8880", italic=True)
 
-    # -- column layout below the introduction -------------------------------------
+    # -- grid -----------------------------------------------------------------------
+    # Every card edge sits on one of four vertical lines (the page frame and the
+    # two column edges), and every vertical gap between cards is exactly G. The
+    # spare height goes into figure cards, never into gaps, so gaps stay equal.
+    G = GAP_MIN
     ix = (PAGE_W - FULL_W) / 2
     colw = (FULL_W - COL_GAP) / 2
-    p1_h = fig_card_h(1, FULL_W)[0]
-    y_cols = TOP + p1_h + GAP_MIN + intro_h + GAP_MIN
-    avail = BOTTOM - y_cols
+    xl, xr = ix, ix + colw + COL_GAP
+    p1_h = fig_card_h(1, FULL_W)
+    text_h = max(text_card_h(pt.METHODS, colw), text_card_h(pt.RESULTS, colw))
+    y_text = TOP + p1_h + G + intro_h + G
+    y_figs = y_text + text_h + G
+    avail = BOTTOM - y_figs
+    if avail <= 0:
+        raise SystemExit("no room for the figure row")
 
-    columns = {
-        "left":  [("text", "methods", "Methods", pt.METHODS), ("fig", 2)],
-        "right": [("text", "results", "Results", pt.RESULTS), ("fig", 4), ("fig", 5)],
-    }
+    def best_scale(fits):
+        if fits(1.0):
+            return 1.0
+        lo, hi = 0.2, 1.0
+        for _ in range(50):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if fits(mid) else (lo, mid)
+        if not fits(lo):
+            raise SystemExit("figures cannot fit")
+        return lo
 
-    def column_h(items, scale):
-        hs = [text_card_h(it[3], colw) if it[0] == "text" else fig_card_h(it[1], colw, scale)[0]
-              for it in items]
-        return sum(hs) + GAP_MIN * (len(items) - 1)
+    s_left = best_scale(lambda sc: fig_card_h(2, colw, sc) <= avail)
+    s_right = best_scale(lambda sc: fig_card_h(4, colw, sc) + G
+                         + fig_card_h(5, colw, sc) <= avail)
+    n4, n5 = fig_card_h(4, colw, s_right), fig_card_h(5, colw, s_right)
+    h4 = n4 + (avail - G - n4 - n5) * n4 / (n4 + n5)
+    h5 = avail - G - h4
 
-    scales = {}
-    for side, items in columns.items():
-        lo, hi = 0.3, 1.0
-        if column_h(items, hi) <= avail:
-            scales[side] = 1.0
-        else:
-            for _ in range(50):
-                mid = (lo + hi) / 2
-                lo, hi = (mid, hi) if column_h(items, mid) <= avail else (lo, mid)
-            scales[side] = lo
-        if column_h(items, scales[side]) > avail + 1e-6:
-            raise SystemExit(f"{side} column cannot fit")
-
-    # -- place ----------------------------------------------------------------------
-    y = TOP
-    place_fig(1, ix, y, FULL_W)
-    y += p1_h + GAP_MIN
-    card("cardIntro", ix, y, FULL_W, intro_h)
-    head = y + TPAD + HEAD * 0.76
+    # -- place ------------------------------------------------------------------------
+    place_fig(1, ix, TOP, FULL_W, p1_h, 1.0)
+    y_intro = TOP + p1_h + G
+    card("cardIntro", ix, y_intro, FULL_W, intro_h)
+    head = y_intro + TPAD + HEAD * 0.76
     heading("introHeading", "Introduction", ix + TPAD, head)
-    first = head + 2.6 + BODY * 0.95
-    for ci, col in enumerate(cols):
-        put_lines(f"introCol{ci + 1}", col, ix + TPAD + ci * (col_w + TCOL_GAP), first, BODY)
+    put_lines("introBody", intro_lines, ix + TPAD, head + 2.6 + BODY * 0.95, BODY)
 
-    new_cards = {}
-    for side, items in columns.items():
-        x = ix if side == "left" else ix + colw + COL_GAP
-        # spread any spare height evenly between this column's cards
-        spare = avail - column_h(items, scales[side])
-        gap = GAP_MIN + (spare / (len(items) - 1) if len(items) > 1 else 0)
-        y = y_cols
-        for it in items:
-            if it[0] == "text":
-                h = text_card_h(it[3], colw)
-                place_text(it[1], it[2], it[3], x, y, colw, h,
-                           show=(it[1] != "methods" or pt.METHODS_APPROVED))
-            else:
-                h = place_fig(it[1], x, y, colw, scales[side])
-                new_cards[f"card{it[1]}"] = y
-            y += h + gap
+    place_text("methods", "Methods", pt.METHODS, xl, y_text, colw, text_h,
+               show=pt.METHODS_APPROVED)
+    place_text("results", "Results", pt.RESULTS, xr, y_text, colw, text_h)
+    place_fig(2, xl, y_figs, colw, avail, s_left)
+    place_fig(4, xr, y_figs, colw, h4, s_right)
+    place_fig(5, xr, y_figs + h4 + G, colw, h5, s_right)
+    new_cards = {"card2": y_figs, "card4": y_figs, "card5": y_figs + h4 + G}
+    scales = {"left": round(s_left, 3), "right": round(s_right, 3)}
+    y_cols = y_text
     W, x0 = colw, ix
     hs = [p1_h, intro_h]
 

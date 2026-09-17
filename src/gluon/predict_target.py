@@ -12,9 +12,13 @@ import polars as pl
 from pathlib import Path
 from autogluon.tabular import TabularPredictor
 
-# The official UCSC URL for hg38 470-way conservation
-_BW_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phastCons470way/hg38.phastCons470way.bw"
-_BW_LOCAL = "hg38.phastCons470way.bw"
+# The conservation track the shipped model was trained on: hg38 phyloP 100-way.
+# feature_extraction.py reads phyloP (signed log-p), and the gene_phyloP columns in
+# the training tables match this track to ~0.1 per base, while the 447- and 470-way
+# phyloP tracks differ by 3-8. A phastCons track here would feed [0, 1]
+# probabilities to features trained on phyloP scores.
+_BW_URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/phyloP100way/hg38.phyloP100way.bw"
+_BW_LOCAL = "hg38.phyloP100way.bw"
 
 # Script directory — all pipeline helpers are expected to sit next to this file
 _HERE = Path(__file__).parent
@@ -81,7 +85,7 @@ def _run(cmd: list[str], step: str, timeout: int | None = None) -> None:
 # =============================================================================
 
 def _download_bigwig(dest: Path) -> None:
-    """Stream-download the phastCons470way BigWig file."""
+    """Stream-download the hg38 phyloP 100-way BigWig file."""
     print(f"Downloading BigWig from UCSC -> {dest} ...")
     r = requests.get(_BW_URL, stream=True)
     r.raise_for_status()
@@ -404,8 +408,9 @@ def main() -> int:
                         help="TSV with conservation vectors (--conservation). "
                              "Mutually exclusive with -bigwig.")
     parser.add_argument("-bigwig",
-                        help="phastCons BigWig file. If neither -conservation_tsv "
-                             "nor -bigwig is given, hg38 470-way BigWig is "
+                        help="phyloP BigWig file (hg38 100-way, matching training). "
+                             "If neither -conservation_tsv nor -bigwig is given, the "
+                             "hg38 phyloP 100-way BigWig is "
                              "downloaded automatically.")
     parser.add_argument("-model", required=True,
                         help="Path to the saved AutoGluon TabularPredictor directory")

@@ -293,7 +293,7 @@ def main() -> int:
     p.add_argument("--threads", type=int, default=8)
     p.add_argument("--allow-missing-conservation", action="store_true",
                    help="Let the five conservation features fall back to 0.0 when "
-                        "the sites TSV carries no phastCons column. Times the same "
+                        "the sites TSV carries no phyloP column. Times the same "
                         "stages, but the APS it reports is not the shipped model's.")
 
     p.add_argument("--cnn-checkpoint", help="Checkpoint .pt (cnn pipeline)")

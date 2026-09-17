@@ -106,12 +106,15 @@ is the supported way to produce a row-aligned pair from a source table:
 python3 src/gluon/make_fastas.py --v7 sites.tsv --mre-fasta mre.fa --mirna-fasta mirna.fa
 ```
 
-**Conservation.** Supply exactly one of:
+**Conservation.** The model uses **phyloP** conservation (hg38, 100-way). Supply
+exactly one of:
 - `-conservation_tsv` — a TSV of MRE coordinates, optionally with a precomputed
-  conservation vector in a list-formatted column (`gene_phastCons` / `gene_phyloP`);
-- `-bigwig` — your own phastCons BigWig.
+  phyloP vector in a list-formatted `gene_phyloP` column;
+- `-bigwig` — a phyloP BigWig. Use the hg38 100-way track: the training data match
+  it, while the 447- and 470-way phyloP tracks give noticeably different scores,
+  and phastCons is a different quantity altogether (a probability in [0, 1]).
 
-If you give **neither**, the pipeline downloads the hg38 470-way phastCons BigWig
+If you give **neither**, the pipeline downloads the hg38 phyloP 100-way BigWig
 automatically. That is a multi-GB fetch — pass one of the two flags to avoid it.
 
 **Shuffle background.** Four features (`E_z_mirna`, `E_hybrid_z_mirna`,
