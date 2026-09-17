@@ -104,7 +104,7 @@ def load(path: Path) -> pd.DataFrame:
 
 
 def main(bare: bool = False, src: Path = SRC, name: str | None = None,
-         narrow: bool = False) -> None:
+         narrow: bool = False, narrow_width: float = 6.1) -> None:
     """`narrow` authors the panel for a half-width poster slot: same point sizes,
     half the width, so on the poster its text matches the full-width panels
     instead of shrinking to half their size."""
@@ -113,7 +113,7 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None,
     ps.apply(9.5)
 
     height = 0.78 * len(datasets) + (1.25 if bare else 2.65)
-    width = 6.1 if narrow else 12.6
+    width = narrow_width if narrow else 12.6
     if narrow:
         # Two legend rows instead of one, so more headroom above the axes.
         height = 0.52 * len(datasets) + (1.55 if bare else 2.85)
@@ -227,7 +227,10 @@ if __name__ == "__main__":
     ap.add_argument("--bare", action="store_true",
                     help="Drop the legend paragraph, for the poster.")
     ap.add_argument("--narrow", action="store_true",
-                    help="Author for a half-width poster slot (6.1 in wide).")
+                    help="Author for a half-width poster slot.")
+    ap.add_argument("--width", type=float, default=6.1,
+                    help="Figure width in inches for --narrow (default 6.1).")
     ap.add_argument("--name", default=None)
     a = ap.parse_args()
-    main(bare=a.bare, src=a.csv, name=a.name, narrow=a.narrow)
+    main(bare=a.bare, src=a.csv, name=a.name, narrow=a.narrow,
+         narrow_width=a.width)

@@ -142,6 +142,8 @@ def main() -> None:
                     help="Author for a half-width poster slot: 6.1 in wide, bare, "
                          "without the family column, so text matches the "
                          "full-width panels once placed.")
+    ap.add_argument("--width", type=float, default=6.1,
+                    help="Figure width in inches for --narrow (default 6.1).")
     ap.add_argument("--name", default="panel5_shap_beeswarm")
     args = ap.parse_args()
 
@@ -167,7 +169,7 @@ def main() -> None:
         args.bare = True
     chrome = 1.35 if args.bare else 2.60
     pitch = 0.30 if args.narrow else 0.36
-    width = 6.1 if args.narrow else 12.2
+    width = args.width if args.narrow else 12.2
     fig, ax = plt.subplots(figsize=(width, chrome + pitch * len(order)))
     # Wide left margin: the row labels carry two columns, the family tag in the
     # outer gutter and the feature name against the axis. Narrow mode keeps

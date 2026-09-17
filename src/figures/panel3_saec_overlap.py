@@ -36,7 +36,7 @@ OUT = RESULTS / "figures"
 STRICT_BIN = "none"
 
 
-def main(bare: bool = False) -> None:
+def main(bare: bool = False, stacked: bool = False, width: float = 8.0) -> None:
     """`bare` drops the figure legend. On the poster the caption beneath the
     panel is the explanatory text, and repeating it inside the image both
     duplicates it and shrinks the plotting area."""
@@ -44,14 +44,24 @@ def main(bare: bool = False) -> None:
     table = pd.read_csv(RESULTS / "saec_aps_by_overlap.csv")
 
     ps.apply(9.5)
-    height = 4.45 if bare else 5.76
-    fig, (axL, axR) = plt.subplots(
-        1, 2, figsize=(12.6, height), gridspec_kw=dict(
-            width_ratios=[1.05, 1.0], wspace=0.24, left=0.055, right=0.985,
-            # Panel titles need a fixed 0.40 in of headroom, so the top margin
-            # is a length converted to a fraction, not a fixed fraction.
-            top=1 - 0.40 / height,
-            bottom=(0.68 if bare else 1.68) / height))
+    if stacked:
+        # Half-width poster slot: (a) above (b), each on a full-width axis.
+        # hspace leaves room for (a)'s x label and (b)'s title between them.
+        bare = True
+        height = 6.0
+        fig, (axL, axR) = plt.subplots(
+            2, 1, figsize=(width, height), gridspec_kw=dict(
+                hspace=0.46, left=0.80 / width, right=1 - 0.15 / width,
+                top=1 - 0.40 / height, bottom=0.68 / height))
+    else:
+        height = 4.45 if bare else 5.76
+        fig, (axL, axR) = plt.subplots(
+            1, 2, figsize=(12.6, height), gridspec_kw=dict(
+                width_ratios=[1.05, 1.0], wspace=0.24, left=0.055, right=0.985,
+                # Panel titles need a fixed 0.40 in of headroom, so the top margin
+                # is a length converted to a fraction, not a fixed fraction.
+                top=1 - 0.40 / height,
+                bottom=(0.68 if bare else 1.68) / height))
 
     # ---- (a) how much overlap, as a function of how strict "overlap" is ------
     # Log y: the two series are two orders of magnitude apart, and the whole
@@ -155,7 +165,8 @@ def main(bare: bool = False) -> None:
 
     # The bare cut is a separate file: the standalone figure still wants its
     # legend, and only the poster copy goes without one.
-    name = "panel3_bare" if bare else "panel3_saec_overlap"
+    name = ("panel3_stacked" if stacked else
+            "panel3_bare" if bare else "panel3_saec_overlap")
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
         fig.savefig(OUT / f"{name}.{ext}", **kw)
@@ -165,4 +176,4 @@ def main(bare: bool = False) -> None:
 
 if __name__ == "__main__":
     import sys
-    main(bare="--bare" in sys.argv)
+    main(bare="--bare" in sys.argv, stacked="--stacked" in sys.argv)

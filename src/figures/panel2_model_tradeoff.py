@@ -362,17 +362,29 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
     ax.minorticks_off()
 
 
-def main(bare: bool = False, src: Path = SRC, name: str | None = None):
+def main(bare: bool = False, src: Path = SRC, name: str | None = None,
+         stacked: bool = False, width: float = 8.0):
     """`bare` drops the headline, standfirst and footnote. On the poster the
     caption beneath the panel carries all of that, and duplicating it inside
     the image both repeats the text and squeezes the two facets."""
     df = pd.read_csv(src)
     ps.apply(base=11)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.55 if bare else 5.9))
-    fig.subplots_adjust(left=0.075, right=0.985,
-                        top=0.855 if bare else 0.685,
-                        bottom=0.125 if bare else 0.185, wspace=0.26)
+    if stacked:
+        # Half-width poster slot: the two facets one above the other, so each
+        # keeps a full-width axis instead of two squeezed side by side. Margins
+        # are in inches so labels keep their size whatever the width.
+        bare = True
+        height = 6.4
+        fig, axes = plt.subplots(2, 1, figsize=(width, height))
+        fig.subplots_adjust(left=0.95 / width, right=1 - 0.18 / width,
+                            top=1 - 0.80 / height, bottom=0.55 / height,
+                            hspace=0.40)
+    else:
+        fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.55 if bare else 5.9))
+        fig.subplots_adjust(left=0.075, right=0.985,
+                            top=0.855 if bare else 0.685,
+                            bottom=0.125 if bare else 0.185, wspace=0.26)
 
     xlims = compute_xlims(df)
     for ax, (key, aps_col, sec_col, title) in zip(axes, FACETS):
@@ -401,7 +413,8 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None):
     ]
     # One row under the subtitle, clear of both the headline and the facets.
     fig.legend(handles=handles, loc="upper left",
-               bbox_to_anchor=(0.072, 0.985 if bare else 0.800),
+               bbox_to_anchor=((0.95 / width - 0.01, 1 - 0.02 / fig.get_figheight())
+                               if stacked else (0.072, 0.985 if bare else 0.800)),
                ncol=4, columnspacing=1.8, handletextpad=0.5,
                labelcolor=ps.INK_2)
 
@@ -416,7 +429,8 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None):
                  fontsize=8.5, color=ps.MUTED, ha="left", va="bottom",
                  linespacing=1.5, transform=fig.transFigure)
 
-    name = name or ("panel2_bare" if bare else "panel2_model_tradeoff")
+    name = name or ("panel2_stacked" if stacked else
+                    "panel2_bare" if bare else "panel2_model_tradeoff")
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
         fig.savefig(OUT / f"{name}.{ext}", **kw)
@@ -436,5 +450,9 @@ if __name__ == "__main__":
                     help="Drop the headline, standfirst and footnote, for the "
                          "poster, where the caption carries them.")
     ap.add_argument("--name", default=None, help="Output basename.")
+    ap.add_argument("--stacked", action="store_true",
+                    help="Facets one above the other, for a half-width poster slot.")
+    ap.add_argument("--width", type=float, default=8.0,
+                    help="Figure width in inches for --stacked (default 8).")
     a = ap.parse_args()
-    main(bare=a.bare, src=a.csv, name=a.name)
+    main(bare=a.bare, src=a.csv, name=a.name, stacked=a.stacked, width=a.width)
