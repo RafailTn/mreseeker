@@ -8,9 +8,9 @@ the panel cards, the panel groups and the introduction card. Everything else -
 the background gradient, the title and its glow, and any artwork added by hand -
 is kept. Hand-added artwork that sits beside a panel moves with that panel.
 
-Panels 2 and 3 keep the groups already in the file. Panels 1, 4 and 5 are
-(re)imported from results/figures, with their ids prefixed so matplotlib's
-repeated names (figure_1, axes_1, clip paths) cannot collide.
+Every panel is (re)imported from results/figures, with its ids prefixed so
+matplotlib's repeated names (figure_1, axes_1, clip paths) cannot collide.
+Panels kept as groups already in the file would be listed in KEPT.
 
 The page is A0, declared on top of an A4 viewBox: the proportions are identical,
 so every coordinate, font size and stroke simply scales by 4.
@@ -39,20 +39,23 @@ FULL_W = 194.0                     # width of the full-page blocks
 
 KEPT: dict = {}
 IMPORTED = {1: REPO / "results/figures/panel1_icons.svg",
-            2: REPO / "results/figures/panel2_stacked.svg",
-            4: REPO / "results/figures/panel4_narrow8.svg",
-            5: REPO / "results/figures/panel5_narrow8.svg"}
+            2: REPO / "results/figures/panel2_leftout.svg",
+            3: REPO / "results/figures/panel_benchmark.svg",
+            4: REPO / "results/figures/panel3_narrow8.svg",
+            5: REPO / "results/figures/panel4_narrow8.svg"}
+# Figures stacked in each column, top to bottom.
+LEFT_FIGS, RIGHT_FIGS = [2, 4], [3, 5]
 # superseded panel groups from earlier layouts
 STALE = ["figure_1-96", "figure_1-2", "figure_1-8", "figure_1", "figure_1-9"]
 OLD_GENERATED_TEXT = True
-BLOCKS = [[1], ["intro"], [2, 3], [4, 5]]
+BLOCKS = [[1], ["intro"], [2], [3, 4]]
 FULL_WIDTH = {1, "intro"}          # blocks that span the page, not the column
 
 FONT_REG = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
 BODY, LEAD, HEAD = 1.95, 1.40, 3.4
 TPAD, TCOL_GAP, TEXT_INK = 4.6, 7.0, "#1c1b19"
 
-GENERATED = re.compile(r"^(card\w*|intro\w*|order\d|p\dn_figure_1|cap\d|methods\w*|results\w*)$")
+GENERATED = re.compile(r"^(card\w*|intro\w*|order\d|p\dn_figure_1|cap\d|methods\w*|results\w*|affiliations|authors)$")
 OVERFLOW_OK = False
 PREFIXED = re.compile(r"^p\dn_")
 URL = re.compile(r"url\(#([^)]+)\)")
@@ -300,7 +303,10 @@ def main() -> None:
     xl, xr = ix, ix + colw + COL_GAP
     p1_h = fig_card_h(1, FULL_W)
     text_h = max(text_card_h(pt.METHODS, colw), text_card_h(pt.RESULTS, colw))
-    y_text = TOP + p1_h + G + intro_h + G
+    # Introduction first, then the schematic: the reader meets the problem
+    # before the two architectures that answer it.
+    y_intro, y_p1 = TOP, TOP + intro_h + G
+    y_text = y_p1 + p1_h + G
     y_figs = y_text + text_h + G
     avail = BOTTOM - y_figs
     if avail <= 0:
@@ -317,28 +323,82 @@ def main() -> None:
             raise SystemExit("figures cannot fit")
         return lo
 
-    s_left = best_scale(lambda sc: fig_card_h(2, colw, sc) <= avail)
-    s_right = best_scale(lambda sc: fig_card_h(4, colw, sc) + G
-                         + fig_card_h(5, colw, sc) <= avail)
-    n4, n5 = fig_card_h(4, colw, s_right), fig_card_h(5, colw, s_right)
-    h4 = n4 + (avail - G - n4 - n5) * n4 / (n4 + n5)
-    h5 = avail - G - h4
+    def column_plan(keys):
+        """Scale that fits the column, then spare height shared out in
+        proportion to each card's natural height so both columns end level."""
+        def fits(sc):
+            return sum(fig_card_h(k, colw, sc) for k in keys) + G * (len(keys) - 1) <= avail
+        sc = best_scale(fits)
+        nat = [fig_card_h(k, colw, sc) for k in keys]
+        spare = avail - sum(nat) - G * (len(keys) - 1)
+        hs = [n + spare * n / sum(nat) for n in nat]
+        hs[-1] = avail - G * (len(keys) - 1) - sum(hs[:-1])   # exact bottom
+        return sc, hs
+
+    s_left, h_left = column_plan(LEFT_FIGS)
+    s_right, h_right = column_plan(RIGHT_FIGS)
+
+    # -- authors and affiliations, in the band between title and first card ----------
+    AUTH, AFF = 2.5, 1.9
+    # Relative dy only. An absolute x or y on a tspan starts a new text chunk,
+    # and with text-anchor:middle every chunk re-centres itself on the page, so
+    # the runs pile up on top of each other. Each raise is undone on the next
+    # run instead.
+    def line(tid, y, size, style_extra, parts):
+        """parts: (text, is_superscript) in order, laid out as one chunk."""
+        t = etree.SubElement(layer, N("text"), id=tid, x=f"{PAGE_W / 2:.3f}",
+                             y=f"{y:.3f}",
+                             style=(f"font-size:{size}px;font-family:'Noto Sans',"
+                                    f"sans-serif;text-anchor:middle;{style_extra}"))
+        rise, prev_sup = size * 0.34, False
+        for text, sup in parts:
+            sp = etree.SubElement(t, N("tspan"))
+            if sup and not prev_sup:
+                sp.set("dy", f"{-rise:.3f}")
+            elif prev_sup and not sup:
+                sp.set("dy", f"{rise:.3f}")
+            if sup:
+                sp.set("style", f"font-size:{size * 0.62:.2f}px")
+            sp.text = text
+            prev_sup = sup
+        return t
+
+    marks = getattr(pt, "AUTHOR_AFFILIATIONS", {})
+    parts = []
+    for i, name in enumerate(pt.AUTHORS):
+        parts.append((("" if i == 0 else ", ") + name, False))
+        if marks.get(name):
+            parts.append((",".join(str(n) for n in marks[name]), True))
+    line("authors", TOP - 8.3, AUTH, "font-weight:bold;fill:#ffffff", parts)
+
+    parts = []
+    for i, name in enumerate(pt.AFFILIATIONS, start=1):
+        if marks:
+            parts.append((("" if i == 1 else "   ·   ") + str(i), True))
+            parts.append((" " + name, False))
+        else:
+            parts.append((("" if i == 1 else "   ·   ") + name, False))
+    line("affiliations", TOP - 4.3, AFF, "fill:#ffffff;fill-opacity:0.93", parts)
 
     # -- place ------------------------------------------------------------------------
-    place_fig(1, ix, TOP, FULL_W, p1_h, 1.0)
-    y_intro = TOP + p1_h + G
     card("cardIntro", ix, y_intro, FULL_W, intro_h)
     head = y_intro + TPAD + HEAD * 0.76
     heading("introHeading", "Introduction", ix + TPAD, head)
     put_lines("introBody", intro_lines, ix + TPAD, head + 2.6 + BODY * 0.95, BODY)
+    place_fig(1, ix, y_p1, FULL_W, p1_h, 1.0)
 
     place_text("methods", "Methods", pt.METHODS, xl, y_text, colw, text_h,
                show=pt.METHODS_APPROVED)
     place_text("results", "Results", pt.RESULTS, xr, y_text, colw, text_h)
-    place_fig(2, xl, y_figs, colw, avail, s_left)
-    place_fig(4, xr, y_figs, colw, h4, s_right)
-    place_fig(5, xr, y_figs + h4 + G, colw, h5, s_right)
-    new_cards = {"card2": y_figs, "card4": y_figs, "card5": y_figs + h4 + G}
+    y = y_figs
+    for k, h in zip(LEFT_FIGS, h_left):
+        place_fig(k, xl, y, colw, h, s_left)
+        y += h + G
+    y = y_figs
+    for k, h in zip(RIGHT_FIGS, h_right):
+        place_fig(k, xr, y, colw, h, s_right)
+        y += h + G
+    new_cards = {f"card{LEFT_FIGS[0]}": y_figs, f"card{RIGHT_FIGS[0]}": y_figs}
     scales = {"left": round(s_left, 3), "right": round(s_right, 3)}
     y_cols = y_text
     W, x0 = colw, ix

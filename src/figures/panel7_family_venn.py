@@ -1,5 +1,5 @@
 """
-Panel 8 - how much of SAEC's miRNA repertoire the models have already seen.
+Panel 7 - how much of SAEC's miRNA repertoire the models have already seen.
 
 The generalisation panels claim the CNN holds up on an unseen cell line. That
 claim is about unseen *sites*; this panel bounds it by showing how far the
@@ -30,7 +30,7 @@ Definitions
 
 Usage
 -----
-python3 src/figures/panel8_family_venn.py [--bare]
+python3 src/figures/panel7_family_venn.py [--bare]
 """
 
 from __future__ import annotations
@@ -217,7 +217,7 @@ def main(bare: bool = False, name: str | None = None) -> None:
         fig.text(0.030, 0.20 / height, "\n".join(textwrap.wrap(legend, width=176)),
                  fontsize=8.5, color=ps.INK_2, va="bottom", linespacing=1.5)
 
-    name = name or ("panel8_bare" if bare else "panel8_family_venn")
+    name = name or ("panel7_bare" if bare else "panel7_family_venn")
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
         fig.savefig(OUT / f"{name}.{ext}", **kw)

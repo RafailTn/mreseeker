@@ -1,5 +1,5 @@
 """
-Panel 5 - what the feature model actually uses.
+Panel 4 - what the feature model actually uses.
 
 This is the panel the deployment argument rests on: the CNN matches the feature
 model closely on accuracy and costs far less, so the reason to ship the feature
@@ -27,7 +27,7 @@ the feature model's own orange.
 
 Usage
 -----
-python3 src/figures/panel5_shap_beeswarm.py
+python3 src/figures/panel4_shap_beeswarm.py
 """
 
 from __future__ import annotations
@@ -144,7 +144,7 @@ def main() -> None:
                          "full-width panels once placed.")
     ap.add_argument("--width", type=float, default=6.1,
                     help="Figure width in inches for --narrow (default 6.1).")
-    ap.add_argument("--name", default="panel5_shap_beeswarm")
+    ap.add_argument("--name", default="panel4_shap_beeswarm")
     args = ap.parse_args()
 
     z = np.load(args.npz, allow_pickle=True)

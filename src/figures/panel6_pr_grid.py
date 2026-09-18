@@ -1,7 +1,7 @@
 """
-Panel 7 - precision-recall curves for every evaluation set, on one grid.
+Panel 6 - precision-recall curves for every evaluation set, on one grid.
 
-Panel 6 shows the two Manakov sets large; this is the same comparison across all
+Panel 5 shows the two Manakov sets large; this is the same comparison across all
 of them, so the reader can see whether the shape of the CNN's advantage on the
 training distribution survives on independent AGO2 data and an unseen cell line.
 Facets read left to right, top to bottom, outwards from the training
@@ -10,7 +10,7 @@ distribution - the same order as the head-to-head panel.
 Axes are shared on purpose: with a common precision scale, a facet whose curves
 sit lower is a genuinely harder set, not an artefact of per-facet limits.
 
-HCT116, Hejret test and Klimentova test are left out; panel 4 carries all of
+HCT116, Hejret test and Klimentova test are left out; panel 3 carries all of
 them with intervals, and the two small test sets (~1,000 rows each) give curves
 too stepped to read at grid size.
 
@@ -19,7 +19,7 @@ src/benchmark/head_to_head.py, since predict_target.py drops the label column.
 
 Usage
 -----
-python3 src/figures/panel7_pr_grid.py [--bare]
+python3 src/figures/panel6_pr_grid.py [--bare]
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "benchmark"))
 import poster_style as ps  # noqa: E402
-from panel6_pr_curves import THRESHOLD, operating_point, thin  # noqa: E402
+from panel5_pr_curves import THRESHOLD, operating_point, thin  # noqa: E402
 from head_to_head import load as load_scores  # noqa: E402
 
 REPO = HERE.parents[1]
@@ -141,7 +141,7 @@ def main(bare: bool = False, name: str | None = None) -> None:
         fig.text(0.030, 0.18 / height, "\n".join(textwrap.wrap(legend, width=176)),
                  fontsize=8.5, color=ps.INK_2, va="bottom", linespacing=1.5)
 
-    name = name or ("panel7_bare" if bare else "panel7_pr_grid")
+    name = name or ("panel6_bare" if bare else "panel6_pr_grid")
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
         fig.savefig(OUT / f"{name}.{ext}", **kw)

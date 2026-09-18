@@ -363,31 +363,40 @@ def draw_facet(ax, df, aps_col, sec_col, title, key, xlim):
 
 
 def main(bare: bool = False, src: Path = SRC, name: str | None = None,
-         stacked: bool = False, width: float = 8.0):
+         stacked: bool = False, width: float = 8.0, only: str | None = None):
     """`bare` drops the headline, standfirst and footnote. On the poster the
     caption beneath the panel carries all of that, and duplicating it inside
     the image both repeats the text and squeezes the two facets."""
     df = pd.read_csv(src)
     ps.apply(base=11)
 
+    # `only` keeps a single evaluation set. The x limits are still computed from
+    # both, so a one-facet cut stays comparable with the two-facet version.
+    facets = [f for f in FACETS if only is None or f[0] == only]
+    if only and not facets:
+        raise SystemExit(f"--only {only}: pick from {[f[0] for f in FACETS]}")
     if stacked:
         # Half-width poster slot: the two facets one above the other, so each
         # keeps a full-width axis instead of two squeezed side by side. Margins
         # are in inches so labels keep their size whatever the width.
         bare = True
-        height = 6.4
-        fig, axes = plt.subplots(2, 1, figsize=(width, height))
+        height = 6.4 if len(facets) > 1 else 3.6
+        fig, axes = plt.subplots(len(facets), 1, figsize=(width, height),
+                                 squeeze=False)
+        axes = axes.ravel()
         fig.subplots_adjust(left=0.95 / width, right=1 - 0.18 / width,
                             top=1 - 0.80 / height, bottom=0.55 / height,
                             hspace=0.40)
     else:
-        fig, axes = plt.subplots(1, 2, figsize=(13.0, 4.55 if bare else 5.9))
+        fig, axes = plt.subplots(1, len(facets), figsize=(13.0, 4.55 if bare else 5.9),
+                                 squeeze=False)
+        axes = axes.ravel()
         fig.subplots_adjust(left=0.075, right=0.985,
                             top=0.855 if bare else 0.685,
                             bottom=0.125 if bare else 0.185, wspace=0.26)
 
     xlims = compute_xlims(df)
-    for ax, (key, aps_col, sec_col, title) in zip(axes, FACETS):
+    for ax, (key, aps_col, sec_col, title) in zip(axes, facets):
         draw_facet(ax, df, aps_col, sec_col, title, key, xlims[key])
 
     if not bare:
@@ -436,7 +445,7 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None,
         fig.savefig(OUT / f"{name}.{ext}", **kw)
     plt.close(fig)
     print("wrote", OUT / f"{name}.{{png,svg,pdf}}")
-    for key, aps_col, sec_col, _ in FACETS:
+    for key, aps_col, sec_col, _ in facets:
         print(f"  {key:8s} front: {pareto_front(df, aps_col, sec_col)}")
 
 
@@ -452,7 +461,10 @@ if __name__ == "__main__":
     ap.add_argument("--name", default=None, help="Output basename.")
     ap.add_argument("--stacked", action="store_true",
                     help="Facets one above the other, for a half-width poster slot.")
+    ap.add_argument("--only", default=None,
+                    help="Keep one facet: test or leftout.")
     ap.add_argument("--width", type=float, default=8.0,
                     help="Figure width in inches for --stacked (default 8).")
     a = ap.parse_args()
-    main(bare=a.bare, src=a.csv, name=a.name, stacked=a.stacked, width=a.width)
+    main(bare=a.bare, src=a.csv, name=a.name, stacked=a.stacked, width=a.width,
+         only=a.only)

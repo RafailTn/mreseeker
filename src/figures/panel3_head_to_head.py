@@ -1,5 +1,5 @@
 """
-Panel 4 - sequence CNN against the feature model, on every evaluation set.
+Panel 3 - sequence CNN against the feature model, on every evaluation set.
 
 The poster asks whether sequence alone matches engineered thermodynamics, but
 until this panel nothing put the two models on one axis: the Pareto panel is
@@ -22,7 +22,7 @@ compared on.
 
 Usage
 -----
-python3 src/figures/panel4_head_to_head.py [--bare]
+python3 src/figures/panel3_head_to_head.py [--bare]
 """
 
 from __future__ import annotations
@@ -206,7 +206,7 @@ def main(bare: bool = False, src: Path = SRC, name: str | None = None,
                  "\n".join(textwrap.wrap(legend, width=176)),
                  fontsize=8.5, color=ps.INK_2, va="bottom", linespacing=1.5)
 
-    name = name or ("panel4_bare" if bare else "panel4_head_to_head")
+    name = name or ("panel3_bare" if bare else "panel3_head_to_head")
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
         fig.savefig(OUT / f"{name}.{ext}", **kw)

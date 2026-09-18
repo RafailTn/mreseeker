@@ -1,5 +1,5 @@
 """
-Panel 6 - precision-recall curves behind the Manakov APS numbers.
+Panel 5 - precision-recall curves behind the Manakov APS numbers.
 
 Average precision is the area under the precision-recall curve, so a single APS
 value hides where along the ranking two models differ. Two models can reach the
@@ -18,7 +18,7 @@ the same files src/benchmark/head_to_head.py reads.
 
 Usage
 -----
-python3 src/figures/panel6_pr_curves.py [--bare]
+python3 src/figures/panel5_pr_curves.py [--bare]
 """
 
 from __future__ import annotations
@@ -148,7 +148,7 @@ def main(bare: bool = False, name: str | None = None) -> None:
         fig.text(0.030, 0.20 / height, "\n".join(textwrap.wrap(legend, width=176)),
                  fontsize=8.5, color=ps.INK_2, va="bottom", linespacing=1.5)
 
-    name = name or ("panel6_bare" if bare else "panel6_pr_curves")
+    name = name or ("panel5_bare" if bare else "panel5_pr_curves")
     OUT.mkdir(parents=True, exist_ok=True)
     for ext, kw in (("png", dict(dpi=400)), ("svg", {}), ("pdf", {})):
         fig.savefig(OUT / f"{name}.{ext}", **kw)
