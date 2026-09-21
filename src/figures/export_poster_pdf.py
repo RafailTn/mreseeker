@@ -35,13 +35,23 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dpi", type=int, default=300,
                     help="Resolution of the baked title glow at A0 print size.")
+    ap.add_argument("--src", type=Path, default=SRC, help="Poster SVG to export.")
+    ap.add_argument("--dst", type=Path, default=None,
+                    help="Output PDF (default: the SVG's name with .pdf).")
     a = ap.parse_args()
 
-    tree = etree.parse(str(SRC))
+    src = a.src
+    dst = a.dst or src.with_suffix(".pdf")
+    tree = etree.parse(str(src))
     root = tree.getroot()
     glow = root.find(f".//{{{SVG}}}ellipse[@id='{GLOW}']")
     if glow is None:
-        raise SystemExit(f"no #{GLOW} in {SRC}; nothing to bake")
+        # No blended glow in this file (it was removed, or a different title
+        # treatment is in use), so a straight export is already correct.
+        subprocess.run(["inkscape", str(src), "--export-type=pdf",
+                        f"--export-filename={dst}"], check=True, capture_output=True)
+        print(f"wrote {dst} (no #{GLOW} to bake)")
+        return
     cx, cy = float(glow.get("cx")), float(glow.get("cy"))
     rx, ry = float(glow.get("rx")), float(glow.get("ry"))
     # Region to bake: the ellipse plus room for its blur, clamped to the page.
@@ -93,8 +103,8 @@ def main() -> None:
         pdf_svg = tmp / "for_pdf.svg"
         out.write(str(pdf_svg), xml_declaration=True, encoding="UTF-8")
         subprocess.run(["inkscape", str(pdf_svg), "--export-type=pdf",
-                        f"--export-filename={DST}"], check=True, capture_output=True)
-    print(f"wrote {DST}")
+                        f"--export-filename={dst}"], check=True, capture_output=True)
+    print(f"wrote {dst}")
 
 
 if __name__ == "__main__":
