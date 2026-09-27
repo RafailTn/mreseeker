@@ -13,7 +13,7 @@ The CNN needs only the sequences. CatBoost needs a feature-extraction pass
 (IntaRNA + phyloP) but gives exact per-prediction SHAP explanations.
 
 Data: miRBench (Gresova et al., 2025), built on the AGO2 chimeric eCLIP of
-Manakov et al. (2022), with false negatives corrected against TarBase.
+Manakov et al. (2022).
 
 ---
 
