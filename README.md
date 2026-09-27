@@ -2,12 +2,12 @@
 
 Predict whether a microRNA binds a candidate target site (MRE) on an mRNA.
 
-Two models are trained on the same data:
+Two models are trained on the same data: a **sequence CNN** that reads the raw
+miRNA and MRE sequences, and a **CatBoost** model (AutoGluon, `CatBoost_BAG_L1`)
+on 26 IntaRNA / conservation features. Both are benchmarked below against
+published models (average precision; chance = 0.5):
 
-| Model | Input | Test APS |
-|---|---|---|
-| **Sequence CNN** | the two raw sequences | 0.87 |
-| **CatBoost** (AutoGluon, `CatBoost_BAG_L1`) | 26 IntaRNA / conservation features | 0.84 |
+![Benchmark: average precision per model and test set](data/panel_benchmark_saec.png)
 
 The CNN needs only the sequences. CatBoost needs a feature-extraction pass
 (IntaRNA + phyloP) but gives exact per-prediction SHAP explanations.
