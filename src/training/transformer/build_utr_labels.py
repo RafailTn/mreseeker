@@ -7,8 +7,8 @@ libraries onto one 3'UTR per gene.  Every UTR position gets one class:
 
     3  KNOWN   inside a chimeric v7 window: bound, and the miRNA is known
     2  BOUND   AGO2 IP enriched over input, no v7 chimera: bound, miRNA unknown
-    1  NONE    expressed, with no IP read, chimera or v7 positive within
-               --buffer nt: nothing bound in these cells
+    1  NONE    expressed, IP no more enriched than input, and no chimera or
+               v7 positive within --buffer nt: nothing bound in these cells
     0  MASKED  everything else (unexpressed, weak IP, non-v7 chimeras, ...)
 
 These are training labels only.  Nothing here becomes a model input: at
@@ -68,8 +68,10 @@ sites.tsv        every v7 row inside a chosen UTR, in transcript coordinates,
                  with its canonical seed site and the read counts around it
 utr3.fa          UTR sequences, 5'->3'                      (with --genome)
 labels.npz       int8 class track per transcript_id         (with --bam-manifest)
-calibration.tsv  how often a real site (v7 positive) would pass the NONE rule,
-                 by input depth; choose --min-input-reads from this
+calibration.tsv  how often a real site (v7 positive) would pass NONE's IP test,
+                 under both rules, by input depth; choose --min-input-reads and
+                 --none-max-fold from this.  The run also prints, per split,
+                 which NONE condition removes how many windows.
 summary.json
 
 Example
@@ -111,6 +113,8 @@ DEFAULT_CHROMS = [str(i) for i in range(1, 23)] + ["X", "Y"]
 V7_COLS = ["gene", "noncodingRNA", "noncodingRNA_name", "noncodingRNA_fam",
            "feature", "label", "chr", "start", "end", "strand"]
 INPUT_BINS = [0, 1, 2, 3, 5, 10, 20, 50, 100, np.inf]
+SITE_COUNT_COLS = ["win_input_reads", "win_ip_reads", "pad_ip_reads", "pad_input_reads"]
+FAIL_NAMES = ["windows", "fail_input", "fail_ip", "fail_chimera", "fail_v7_veto", "none"]
 
 _COMP = str.maketrans("ACGTN", "TGCAN")
 
@@ -495,7 +499,7 @@ def label_track(L, ip, inp, chim, veto, known, masked, lib, p):
     W, buf = p["window"], p["buffer"]
     lab = np.zeros(L, dtype=np.int8)
     if L < W:
-        return lab, None
+        return lab, None, np.zeros(6, dtype=np.int64)
     expts = sorted(set(ip) | set(inp))
     zero = (np.empty(0, np.int64), np.empty(0, np.int64))
     ip_w = {e: window_counts(*ip.get(e, zero), L, W) for e in expts}
@@ -503,10 +507,22 @@ def label_track(L, ip, inp, chim, veto, known, masked, lib, p):
     ip_sum = sum(ip_w.values())
     in_sum = sum(in_w.values())
     ip_pad = sum(window_counts(*ip.get(e, zero), L, W, buf) for e in expts)
+    in_pad = sum(window_counts(*inp.get(e, zero), L, W, buf) for e in expts)
 
-    clear = ((ip_pad == 0) & (window_counts(*chim, L, W, buf) == 0)
-             & (window_counts(*veto, L, W, buf) == 0))
-    none_win = clear & (in_sum >= p["min_input_reads"])
+    # NONE needs four things; each is kept separately so the run can report
+    # which one removes the windows.  IP libraries carry non-specific background
+    # across every expressed UTR, so "no IP read at all" leaves almost nothing
+    # (the ip0 rule); the default asks for no enrichment over input instead.
+    input_ok = in_sum >= p["min_input_reads"]
+    if p["none_rule"] == "ip0":
+        ip_ok = ip_pad == 0
+    else:
+        ip_ok = ip_pad * lib["input_total"] <= p["none_max_fold"] * (in_pad + 1) * lib["ip_total"]
+    chim_ok = window_counts(*chim, L, W, buf) == 0
+    veto_ok = window_counts(*veto, L, W, buf) == 0
+    none_win = input_ok & ip_ok & chim_ok & veto_ok
+    fails = np.array([len(none_win), (~input_ok).sum(), (~ip_ok).sum(), (~chim_ok).sum(),
+                      (~veto_ok).sum(), none_win.sum()], dtype=np.int64)
 
     # Enriched in an experiment: IP/ip_lib >= fold * (input + 1)/input_lib.  The
     # pseudo-read keeps a shallow input (Expt4: 8M against 36M IP) from turning
@@ -523,7 +539,7 @@ def label_track(L, ip, inp, chim, veto, known, masked, lib, p):
         lab[s:e] = KNOWN
     for s, e in masked:
         lab[max(s - buf, 0):e + buf] = MASKED
-    return lab, (in_sum, ip_sum, ip_pad)
+    return lab, (in_sum, ip_sum, ip_pad, in_pad), fails
 
 
 def _process(task):
@@ -539,19 +555,19 @@ def _process(task):
         ip, inp = defaultdict(list), defaultdict(list)
         for expt, role, flip, bam in _W["bams"]:
             (ip if role == "ip" else inp)[expt].extend(read_spans(bam, utr, flip, p["min_mapq"]))
-        lab, counts = label_track(
+        lab, counts, fails = label_track(
             L, {e: spans_array(v) for e, v in ip.items()},
             {e: spans_array(v) for e, v in inp.items()},
             spans_array(task["chim"]), spans_array(task["veto"]),
             task["known"], task["masked"], _W["lib"], p)
-        out["labels"] = lab
+        out["labels"], out["fails"] = lab, fails
         stats = []
         for _, s, _e, _t in task["sites"]:
             j = min(s, L - p["window"])
             if counts is None or j < 0:
-                stats.append((-1, -1, -1))
+                stats.append((-1,) * len(SITE_COUNT_COLS))
             else:
-                stats.append((int(counts[0][j]), int(counts[1][j]), int(counts[2][j])))
+                stats.append(tuple(int(c[j]) for c in counts))
         out["site_counts"] = stats
     return out
 
@@ -604,7 +620,10 @@ def load_manifest(path: str):
         for role in ("ip", "input"):
             if (e, role) not in lib.index:
                 raise SystemExit(f"experiment {e} has no {role} BAM; enrichment needs both")
-    return m, {k: float(v) for k, v in lib.items()}
+    lib = {k: float(v) for k, v in lib.items()}
+    totals = {f"{role}_total": sum(v for (_, r), v in lib.items() if r == role)
+              for role in ("ip", "input")}
+    return m, lib | totals
 
 
 # ---------------------------------------------------------------------------
@@ -632,8 +651,13 @@ def main() -> int:
     ap.add_argument("--window", type=int, default=50)
     ap.add_argument("--buffer", type=int, default=50,
                     help="clearance around IP reads, chimeras and v7 positives for NONE")
-    ap.add_argument("--min-input-reads", type=int, default=5,
+    ap.add_argument("--min-input-reads", type=int, default=10,
                     help="input reads (summed over experiments) a NONE window needs")
+    ap.add_argument("--none-rule", choices=["fold", "ip0"], default="fold",
+                    help="fold: IP no more enriched than --none-max-fold over input across the "
+                         "padded window; ip0: no IP read at all (leaves almost no 3'UTR)")
+    ap.add_argument("--none-max-fold", type=float, default=1.0,
+                    help="library-normalised IP/(input+1) allowed in a NONE window (fold rule)")
     ap.add_argument("--bound-min-ip", type=int, default=10)
     ap.add_argument("--bound-min-fold", type=float, default=8.0)
     ap.add_argument("--bound-min-expts", type=int, default=2)
@@ -645,8 +669,9 @@ def main() -> int:
     t0 = time.time()
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    params = {k: getattr(args, k) for k in ("window", "buffer", "min_input_reads", "bound_min_ip",
-                                            "bound_min_fold", "bound_min_expts", "min_mapq")}
+    params = {k: getattr(args, k) for k in ("window", "buffer", "min_input_reads", "none_rule",
+                                            "none_max_fold", "bound_min_ip", "bound_min_fold",
+                                            "bound_min_expts", "min_mapq")}
 
     utrs = select_utrs(args.gtf, set(args.chroms), args.window)
     print(f"[utr] {len(utrs):,} genes, {sum(u.length for u in utrs) / 1e6:.1f} Mb of 3'UTR")
@@ -712,7 +737,8 @@ def main() -> int:
               "filtered out (other small RNAs, failed filters) can still land in NONE")
 
     labels, seqs = {}, {}
-    site_counts = np.full((len(sites), 3), -1, dtype=np.int64)
+    site_counts = np.full((len(sites), len(SITE_COUNT_COLS)), -1, dtype=np.int64)
+    fails = {sp: np.zeros(len(FAIL_NAMES), dtype=np.int64) for sp in ("train", "val", "test")}
     seq_match = np.full(len(sites), np.nan)
     strand_calls = {}
     if args.genome or args.bam_manifest:
@@ -747,6 +773,7 @@ def main() -> int:
                     seq_match[rows] = res["seq_match"]
                 if "labels" in res:
                     labels[ui] = res["labels"]
+                    fails[split[ui]] += res["fails"]
                     if rows:
                         site_counts[rows] = res["site_counts"]
                 if n % 2000 == 0:
@@ -788,8 +815,9 @@ def main() -> int:
         sites["seq_match"] = seq_match
         keep.append("seq_match")
     if labels:
-        sites["win_input_reads"], sites["win_ip_reads"], sites["pad_ip_reads"] = site_counts.T
-        keep += ["win_input_reads", "win_ip_reads", "pad_ip_reads"]
+        for col, values in zip(SITE_COUNT_COLS, site_counts.T):
+            sites[col] = values
+        keep += SITE_COUNT_COLS
     sites[keep].to_csv(out / "sites.tsv", sep="\t", index=False)
 
     summary = {"params": params, "genes": len(utrs), "mapping": mapping,
@@ -803,6 +831,13 @@ def main() -> int:
                 entry[f"{name}_nt"] = int(utr_df.loc[ms, f"n_{name}_nt"].sum())
         summary["splits"][sp] = entry
         print(f"[split] {sp:5s} {entry}")
+        if labels:
+            # Conditions are counted independently, so the fail columns overlap.
+            f = dict(zip(FAIL_NAMES, fails[sp].tolist()))
+            summary["splits"][sp]["none_windows"] = f
+            n = max(f["windows"], 1)
+            print(f"[none] {sp:5s} of {f['windows']:,} windows: "
+                  + ", ".join(f"{k} {v / n:.1%}" for k, v in f.items() if k != "windows"))
 
     if args.genome:
         checked = sites["seq_match"].dropna()
@@ -811,22 +846,26 @@ def main() -> int:
               f"{summary['seq_match_rate']:.2%} of {len(checked):,} sites")
 
     if labels:
-        # How often a real site would pass NONE if its chimera had been missed:
-        # enough input, and no IP read within the buffer.
+        # How often a real site would pass NONE's IP condition if its chimera had
+        # been missed, under both rules.  Chimera and v7 vetoes are ignored here:
+        # they are what a missed site would lack.
         cal = sites[(sites["label"] == 1) & sites["role"].isin(TRACK_ROLES)
                     & (sites["win_input_reads"] >= 0)]
-        cal = cal.assign(bin=pd.cut(cal["win_input_reads"], INPUT_BINS, right=False))
+        fold_ok = (cal["pad_ip_reads"] * lib["input_total"]
+                   <= args.none_max_fold * (cal["pad_input_reads"] + 1) * lib["ip_total"])
+        cal = cal.assign(bin=pd.cut(cal["win_input_reads"], INPUT_BINS, right=False),
+                         ip_free=cal["pad_ip_reads"] == 0, fold_ok=fold_ok)
         table = cal.groupby("bin", observed=False).agg(
-            sites=("pad_ip_reads", "size"),
-            ip_free=("pad_ip_reads", lambda x: int((x == 0).sum())))
+            sites=("ip_free", "size"), ip_free=("ip_free", "sum"), fold_ok=("fold_ok", "sum"))
         table["frac_ip_free"] = table["ip_free"] / table["sites"].clip(lower=1)
+        table["frac_fold_ok"] = table["fold_ok"] / table["sites"].clip(lower=1)
         table.to_csv(out / "calibration.tsv", sep="\t")
-        passing = ((cal["win_input_reads"] >= args.min_input_reads)
-                   & (cal["pad_ip_reads"] == 0)).mean()
+        ip_pass = cal["ip_free"] if args.none_rule == "ip0" else cal["fold_ok"]
+        passing = ((cal["win_input_reads"] >= args.min_input_reads) & ip_pass).mean()
         summary["positive_would_pass_none"] = float(passing)
         print(table.to_string())
-        print(f"[calibration] {passing:.3%} of positive sites would pass NONE at "
-              f"--min-input-reads {args.min_input_reads}")
+        print(f"[calibration] {passing:.3%} of positive sites would pass NONE "
+              f"(--none-rule {args.none_rule}, --min-input-reads {args.min_input_reads})")
 
     with open(out / "summary.json", "w") as fh:
         json.dump(summary, fh, indent=2, default=str)
