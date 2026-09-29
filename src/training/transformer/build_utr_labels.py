@@ -7,8 +7,9 @@ libraries onto one 3'UTR per gene.  Every UTR position gets one class:
 
     3  KNOWN   inside a chimeric v7 window: bound, and the miRNA is known
     2  BOUND   AGO2 IP enriched over input, no v7 chimera: bound, miRNA unknown
-    1  NONE    expressed, IP no more enriched than input, and no chimera or
-               v7 positive within --buffer nt: nothing bound in these cells
+    1  NONE    expressed, no 50-nt window within --buffer nt enriched in IP
+               over input, and no chimera or v7 positive within --buffer nt:
+               nothing bound in these cells
     0  MASKED  everything else (unexpressed, weak IP, non-v7 chimeras, ...)
 
 These are training labels only.  Nothing here becomes a model input: at
@@ -113,7 +114,7 @@ DEFAULT_CHROMS = [str(i) for i in range(1, 23)] + ["X", "Y"]
 V7_COLS = ["gene", "noncodingRNA", "noncodingRNA_name", "noncodingRNA_fam",
            "feature", "label", "chr", "start", "end", "strand"]
 INPUT_BINS = [0, 1, 2, 3, 5, 10, 20, 50, 100, np.inf]
-SITE_COUNT_COLS = ["win_input_reads", "win_ip_reads", "pad_ip_reads", "pad_input_reads"]
+SITE_COUNT_COLS = ["win_input_reads", "win_ip_reads", "pad_ip_reads", "local_fold_ok"]
 FAIL_NAMES = ["windows", "fail_input", "fail_ip", "fail_chimera", "fail_v7_veto", "none"]
 
 _COMP = str.maketrans("ACGTN", "TGCAN")
@@ -507,17 +508,24 @@ def label_track(L, ip, inp, chim, veto, known, masked, lib, p):
     ip_sum = sum(ip_w.values())
     in_sum = sum(in_w.values())
     ip_pad = sum(window_counts(*ip.get(e, zero), L, W, buf) for e in expts)
-    in_pad = sum(window_counts(*inp.get(e, zero), L, W, buf) for e in expts)
+
+    # Fold is judged per 50-nt window, then required of every window within
+    # --buffer.  Averaging over the whole padded span instead lets the input of
+    # a highly expressed transcript dilute a real 50-nt peak until it reads as
+    # background, so false NONE rose with expression.
+    enriched_w = ip_sum * lib["input_total"] > p["none_max_fold"] * (in_sum + 1) * lib["ip_total"]
+    near = np.concatenate(([0], np.cumsum(enriched_w)))
+    j = np.arange(len(enriched_w))
+    lo = np.clip(j - buf, 0, len(enriched_w))
+    hi = np.clip(j + buf + 1, 0, len(enriched_w))
+    local_fold_ok = (near[hi] - near[lo]) == 0
 
     # NONE needs four things; each is kept separately so the run can report
     # which one removes the windows.  IP libraries carry non-specific background
     # across every expressed UTR, so "no IP read at all" leaves almost nothing
     # (the ip0 rule); the default asks for no enrichment over input instead.
     input_ok = in_sum >= p["min_input_reads"]
-    if p["none_rule"] == "ip0":
-        ip_ok = ip_pad == 0
-    else:
-        ip_ok = ip_pad * lib["input_total"] <= p["none_max_fold"] * (in_pad + 1) * lib["ip_total"]
+    ip_ok = (ip_pad == 0) if p["none_rule"] == "ip0" else local_fold_ok
     chim_ok = window_counts(*chim, L, W, buf) == 0
     veto_ok = window_counts(*veto, L, W, buf) == 0
     none_win = input_ok & ip_ok & chim_ok & veto_ok
@@ -539,7 +547,7 @@ def label_track(L, ip, inp, chim, veto, known, masked, lib, p):
         lab[s:e] = KNOWN
     for s, e in masked:
         lab[max(s - buf, 0):e + buf] = MASKED
-    return lab, (in_sum, ip_sum, ip_pad, in_pad), fails
+    return lab, (in_sum, ip_sum, ip_pad, local_fold_ok.astype(np.int64)), fails
 
 
 def _process(task):
@@ -657,7 +665,8 @@ def main() -> int:
                     help="fold: IP no more enriched than --none-max-fold over input across the "
                          "padded window; ip0: no IP read at all (leaves almost no 3'UTR)")
     ap.add_argument("--none-max-fold", type=float, default=1.0,
-                    help="library-normalised IP/(input+1) allowed in a NONE window (fold rule)")
+                    help="fold rule: largest library-normalised IP/(input+1) allowed in any 50-nt "
+                         "window within --buffer of a NONE window")
     ap.add_argument("--bound-min-ip", type=int, default=10)
     ap.add_argument("--bound-min-fold", type=float, default=8.0)
     ap.add_argument("--bound-min-expts", type=int, default=2)
@@ -851,10 +860,8 @@ def main() -> int:
         # they are what a missed site would lack.
         cal = sites[(sites["label"] == 1) & sites["role"].isin(TRACK_ROLES)
                     & (sites["win_input_reads"] >= 0)]
-        fold_ok = (cal["pad_ip_reads"] * lib["input_total"]
-                   <= args.none_max_fold * (cal["pad_input_reads"] + 1) * lib["ip_total"])
         cal = cal.assign(bin=pd.cut(cal["win_input_reads"], INPUT_BINS, right=False),
-                         ip_free=cal["pad_ip_reads"] == 0, fold_ok=fold_ok)
+                         ip_free=cal["pad_ip_reads"] == 0, fold_ok=cal["local_fold_ok"] == 1)
         table = cal.groupby("bin", observed=False).agg(
             sites=("ip_free", "size"), ip_free=("ip_free", "sum"), fold_ok=("fold_ok", "sum"))
         table["frac_ip_free"] = table["ip_free"] / table["sites"].clip(lower=1)
