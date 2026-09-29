@@ -69,6 +69,9 @@ sites.tsv        every v7 row inside a chosen UTR, in transcript coordinates,
                  with its canonical seed site and the read counts around it
 utr3.fa          UTR sequences, 5'->3'                      (with --genome)
 labels.npz       int8 class track per transcript_id         (with --bam-manifest)
+input_reads.npz  per transcript_id, input reads (stranded, summed over
+                 experiments) overlapping the 50-nt window starting at each
+                 position; for expression-matched comparisons within a UTR
 calibration.tsv  how often a real site (v7 positive) would pass NONE's IP test,
                  under both rules, by input depth; choose --min-input-reads and
                  --none-max-fold from this.  The run also prints, per split,
@@ -569,6 +572,10 @@ def _process(task):
             spans_array(task["chim"]), spans_array(task["veto"]),
             task["known"], task["masked"], _W["lib"], p)
         out["labels"], out["fails"] = lab, fails
+        # Clipped to uint16: the track only has to rank expression, and the
+        # deepest windows run to thousands of reads at most.
+        if counts is not None:
+            out["input"] = np.minimum(counts[0], 65535).astype(np.uint16)
         stats = []
         for _, s, _e, _t in task["sites"]:
             j = min(s, L - p["window"])
@@ -745,7 +752,7 @@ def main() -> int:
         print("[chimeras] none given: only v7 positives veto NONE; chimeras that miRBench "
               "filtered out (other small RNAs, failed filters) can still land in NONE")
 
-    labels, seqs = {}, {}
+    labels, seqs, input_track = {}, {}, {}
     site_counts = np.full((len(sites), len(SITE_COUNT_COLS)), -1, dtype=np.int64)
     fails = {sp: np.zeros(len(FAIL_NAMES), dtype=np.int64) for sp in ("train", "val", "test")}
     seq_match = np.full(len(sites), np.nan)
@@ -782,6 +789,8 @@ def main() -> int:
                     seq_match[rows] = res["seq_match"]
                 if "labels" in res:
                     labels[ui] = res["labels"]
+                    if "input" in res:
+                        input_track[ui] = res["input"]
                     fails[split[ui]] += res["fails"]
                     if rows:
                         site_counts[rows] = res["site_counts"]
@@ -807,6 +816,8 @@ def main() -> int:
                                       for ui in range(len(utrs))]
         np.savez_compressed(out / "labels.npz",
                             **{utrs[ui].transcript_id: lab for ui, lab in labels.items()})
+        np.savez_compressed(out / "input_reads.npz",
+                            **{utrs[ui].transcript_id: t for ui, t in input_track.items()})
     utr_df.to_csv(out / "utrs.tsv", sep="\t", index=False)
     if seqs:
         with open(out / "utr3.fa", "w") as fh:
