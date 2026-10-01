@@ -40,6 +40,14 @@ test_wrong_mirna.tsv     chr1 positives + one wrong-miRNA pair each (pair_id
 
 Train A and B on identical positives and splits; they differ only in negatives.
 
+Positive enrichment filter (--min-site-fold, off by default): drops training
+and validation positives whose own 50-nt window is not enriched in AGO2 IP over
+input, i.e. library-normalised IP / (input + 1) below the cut.  These are
+chimeras sitting on background, which may be low-occupancy sites or ligation
+noise.  Test positives are kept, so a filtered run is scored on the same rows
+as an unfiltered one.  Write it to its own --out-dir and compare its B against
+the unfiltered B.
+
 Family balance (train and val, on by default): each miRNA family keeps
 n = min(positives, A negatives, B negatives) of each, sampled once for the
 positives and shared by A and B.  Every family is then exactly 50/50, so a
@@ -96,6 +104,11 @@ def main() -> int:
                     help="chimeras a miRNA needs (train+val) to count as expressed")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-family-balance", dest="family_balance", action="store_false")
+    ap.add_argument("--min-site-fold", type=float, default=None,
+                    help="drop train/val positives whose window has library-normalised "
+                         "IP/(input+1) below this (e.g. 1.0); needs the builder's read counts")
+    ap.add_argument("--bam-manifest", default=None,
+                    help="library sizes for --min-site-fold (default: LABELS_DIR/bams.tsv)")
     args = ap.parse_args()
     rng = np.random.default_rng(args.seed)
     d, out = Path(args.labels_dir), Path(args.out_dir)
@@ -105,7 +118,7 @@ def main() -> int:
     sites = pd.read_csv(d / "sites.tsv", sep="\t",
                         usecols=["transcript_id", "split", "role", "label", "tx_start",
                                  "mirna_seq", "family", "heldout_family", "site_type",
-                                 "target_seq"])
+                                 "target_seq", "win_ip_reads", "win_input_reads"])
     sites = sites[(sites["role"] != "external") & ~sites["heldout_family"]]
     sites = sites.drop_duplicates(["target_seq", "mirna_seq", "label"])
     sites = sites.rename(columns={"target_seq": "gene", "mirna_seq": "noncodingRNA",
@@ -117,6 +130,21 @@ def main() -> int:
     fit = pos[pos["split"].isin(["train", "val"])]
     counts = fit["noncodingRNA"].value_counts()
     rep = counts[counts >= args.min_sites]
+
+    if args.min_site_fold is not None:
+        bams = pd.read_csv(args.bam_manifest or d / "bams.tsv", sep="\t")
+        lib = bams.groupby(bams["role"].str.lower())["library_size"].sum()
+        fold = ((pos["win_ip_reads"] / lib["ip"])
+                / ((pos["win_input_reads"] + 1) / lib["input"]))
+        counted = pos["win_ip_reads"] >= 0  # -1: the builder ran without BAMs
+        if not counted.any():
+            raise SystemExit("--min-site-fold needs sites.tsv from a builder run with BAMs")
+        drop = counted & (fold < args.min_site_fold) & (pos["split"] != "test")
+        for sp in ("train", "val"):
+            m = pos["split"] == sp
+            print(f"[enrichment] {sp}: dropping {int((drop & m).sum()):,} of {int(m.sum()):,} "
+                  f"positives with fold < {args.min_site_fold}")
+        pos = pos[~drop]
     rep_seq = rep.index.tolist()
     rep_fam = fit.drop_duplicates("noncodingRNA").set_index("noncodingRNA")["noncodingRNA_fam"]
     rep_fam = [rep_fam[s] for s in rep_seq]
