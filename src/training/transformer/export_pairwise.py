@@ -100,6 +100,10 @@ def main() -> int:
     ap.add_argument("--random-per-window", type=int, default=1)
     ap.add_argument("--new-frac", type=float, default=0.5,
                     help="recipe B: share of negatives taken from NONE windows")
+    ap.add_argument("--fill-with-old", action="store_true",
+                    help="when NONE windows run short, keep the full negative count and top B "
+                         "up with old negatives (default: shrink both recipes so B hits "
+                         "--new-frac exactly)")
     ap.add_argument("--min-sites", type=int, default=50,
                     help="chimeras a miRNA needs (train+val) to count as expressed")
     ap.add_argument("--seed", type=int, default=42)
@@ -216,12 +220,19 @@ def main() -> int:
         n_neg = len(o)
         n_new = min(int(round(args.new_frac * n_neg)), len(n))
         if n_new < args.new_frac * n_neg:
-            print(f"[B] {sp}: only {len(n):,} NONE negatives for a {args.new_frac:.0%} share "
-                  f"of {n_neg:,}; using all of them (lower --stride or raise "
-                  f"--random-per-window for more)")
+            if args.fill_with_old:
+                print(f"[B] {sp}: only {len(n):,} NONE negatives for a {args.new_frac:.0%} share "
+                      f"of {n_neg:,}; topping up with old negatives")
+            else:
+                # Shrink instead: all NONE negatives, the matching number of old
+                # ones, and A cut to the same total so the recipes stay size-matched.
+                n_neg = min(len(o), int(len(n) / args.new_frac))
+                n_new = int(round(args.new_frac * n_neg))
+                print(f"[B] {sp}: NONE negatives limit the {args.new_frac:.0%} share; "
+                      f"negatives per recipe cut to {n_neg:,}")
         b_neg = pd.concat([o.sample(n_neg - n_new, random_state=args.seed),
                            n.sample(n_new, random_state=args.seed)])
-        a_neg = o
+        a_neg = o.sample(n_neg, random_state=args.seed + 1)
         if args.family_balance:
             before = len(p)
             p, a_neg, b_neg, kept, dropped = balance(p, a_neg, b_neg)
