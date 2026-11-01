@@ -20,9 +20,9 @@ aliases; a row is kept if *any* alias is expressed, since they are the same
 molecule.
 
     pixi run -m dependencies/cnn python src/eqtl_analysis/filter_eqtls_by_expression.py \
-        --input results/eqtl_intarna/delta_pred_in_interaction_pip_gt_0_9.tsv \
+        --input results/eqtl_duplex/delta_pred_in_interaction_pip_gt_0_9.tsv \
         --top-mirnas results/gtex_mirna_expression/top100_by_subtissue.tsv \
-        -o results/eqtl_intarna/delta_pred_expr_in_interaction_pip_gt_0_9.tsv
+        -o results/eqtl_duplex/delta_pred_expr_in_interaction_pip_gt_0_9.tsv
 """
 from __future__ import annotations
 

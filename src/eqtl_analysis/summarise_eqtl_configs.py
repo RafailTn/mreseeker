@@ -3,7 +3,7 @@
 Collate every eQTL filtering configuration into one comparison table.
 
 Each `eqtl_pip_separation.py` run writes its own separation_stats.json, but the
-question being asked is comparative - does filtering on the IntaRNA interaction
+question being asked is comparative - does filtering on the CNN-duplex interaction
 footprint, on CNN confidence, or on tissue expression change the separation? -
 and that only reads off a table with all configurations side by side.
 
@@ -19,7 +19,7 @@ high-PIP group ranks larger, i.e. the direction the mechanism predicts for
 |delta_pred|. The column is reported as-is; `abs_direction_ok` flags it.
 
     pixi run -m dependencies/cnn python src/eqtl_analysis/summarise_eqtl_configs.py \
-        --results-dir results/eqtl_intarna -o results/eqtl_intarna/summary_all_configs
+        --results-dir results/eqtl_duplex -o results/eqtl_duplex/summary_all_configs
 """
 from __future__ import annotations
 

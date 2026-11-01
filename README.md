@@ -14,17 +14,13 @@ Manakov et al. (2022).
 
 ## Installation
 
-Environments are managed with [Pixi](https://pixi.prefix.dev/latest/installation/):
+The environment is managed with [Pixi](https://pixi.prefix.dev/latest/installation/):
 
 ```bash
 pixi install --manifest-path dependencies/cnn/pixi.toml    # PyTorch + Optuna (CUDA)
-pixi install --manifest-path dependencies/gluon/pixi.toml  # IntaRNA + ViennaRNA, eQTL footprints only
 ```
 
-The CNN needs only the first. The second provides IntaRNA for the eQTL
-interaction filter (`src/gluon/intarna_parallel.py` →
-`src/eqtl_analysis/filter_eqtls_by_interaction.py`). Enter an environment with
-`pixi shell` rather than calling its Python binary directly, so `IntaRNA` is on `PATH`.
+Each example first enters it with `pixi shell`, then runs the script.
 
 ---
 
@@ -119,10 +115,9 @@ writes can be scored directly with `predict_cnn.py`.
 src/cnn/              CNN inference (predict_cnn.py), duplex plots (plot_duplex.py)
 src/training/cnn/     CNN model + training/explain CLI, duplex decoder, Optuna search
 src/eqtl_analysis/    GTEx eQTL scoring with the CNN
-src/gluon/            intarna_parallel.py only (IntaRNA runs for the eQTL filter)
 cnn_checkpoints/      shipped CNN checkpoint
-data/                 eQTL fragment tables and the TP pair / FASTA sets
-dependencies/         Pixi manifests (cnn, gluon)
+data/                 eQTL fragment tables and the CNN-TP pair sets
+dependencies/cnn/     Pixi manifest
 ```
 
 ---
@@ -131,5 +126,3 @@ dependencies/         Pixi manifests (cnn, gluon)
 
 - Gresova, K., et al. (2025). miRBench datasets (v6). Zenodo. https://doi.org/10.5281/zenodo.14734014
 - Manakov, S. A., et al. (2022). Scalable and deep profiling of mRNA targets for individual microRNAs with chimeric eCLIP. bioRxiv. https://doi.org/10.1101/2022.02.13.480296
-- Mann, M., Wright, P. R., & Backofen, R. (2017). IntaRNA 2.0. *Nucleic Acids Research*, 45(W1), W435–W439. https://doi.org/10.1093/nar/gkx279
-- Lorenz, R., et al. (2011). ViennaRNA Package 2.0. *Algorithms for Molecular Biology*, 6, 26.

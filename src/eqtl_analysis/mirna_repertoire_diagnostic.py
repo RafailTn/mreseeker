@@ -27,8 +27,8 @@ Reporting (1) without (2) would be actively misleading, so both always run.
         --top-mirnas results/gtex_mirna_expression/top100_by_subtissue.tsv \
         --mirna-seqs data/mirbase_mature_hg38.tsv \
         --checkpoint cnn_checkpoints/cnn_branches_mirbind_embed16_restruct.pt \
-        --annotated results/eqtl_intarna/eqtl_annotated_pip_gt_0_9.tsv \
-        -o results/eqtl_intarna/repertoire_diagnostic_pip_gt_0_9
+        --annotated results/eqtl_duplex/eqtl_annotated_pip_gt_0_9.tsv \
+        -o results/eqtl_duplex/repertoire_diagnostic_pip_gt_0_9
 """
 from __future__ import annotations
 

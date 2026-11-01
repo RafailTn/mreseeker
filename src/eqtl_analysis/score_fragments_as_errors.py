@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Give a fragment source without a CNN error TSV one, so it can feed the
-IntaRNA interaction filter.
+CNN-duplex interaction filter.
 
-`tp_intarna_pairs.py` identifies the interaction footprint from CNN *true
+`tp_pairs.py` identifies the interaction footprint from CNN *true
 positives*, which it reads from the error TSVs (`error_type` == 'TP'). The
 Manakov/miRBench fragments have those; the GSE304955 (SAEC) fragments do not -
 they ship as labelled positives only, and their `.cnncache.npz` holds encoded
@@ -22,7 +22,7 @@ re-scoring training rows in-sample would not be comparable.
 
 Output is shaped like an error TSV (`gene` = MRE sequence, `noncodingRNA` =
 miRNA sequence, plus `error_type` / `interaction_probability`) so it drops
-straight into `tp_intarna_pairs.py --errors`.
+straight into `tp_pairs.py --errors`.
 
     pixi run -m dependencies/cnn python src/eqtl_analysis/score_fragments_as_errors.py \
         --input data/GTEx_..._pip_gt_0_9_union_fragments.tsv \

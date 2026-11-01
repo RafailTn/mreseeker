@@ -1,53 +1,41 @@
 #!/usr/bin/env python3
 """
 Collect the CNN true-positive (MRE, miRNA) pairs that an eQTL actually sits on,
-and emit the row-aligned FASTA pair `intarna_parallel.py` expects.
+as the input for `cnn_branches_mirbind.py explain --duplex` (whose output feeds
+filter_eqtls_by_interaction.py).
 
 Only pairs present in the merged GTEx-eQTL x miRBench fragment files can ever
-contribute to the downstream eQTL filter, so there is no point pushing all
-~840k CNN TPs through IntaRNA - the eQTL-overlapping subset (~7.3k pairs)
-yields an identical filter for a fraction of the runtime.
+contribute to the downstream eQTL filter, so there is no point explaining all
+~840k CNN TPs - the eQTL-overlapping subset (~7.3k pairs) yields an identical
+filter for a fraction of the runtime.
 
 A pair is keyed on (MRE sequence, miRNA sequence), the only identity the error
 TSVs and the eQTL files share: the error TSVs carry no `unique_key`, and the
 same 50-nt fragment can recur at several loci. Keying on sequence also matches
-what the CNN actually saw, and it keeps the IntaRNA footprint (a pure function
+what the CNN actually saw, and it keeps the duplex footprint (a pure function
 of the two sequences) reusable across every locus the pair occurs at.
 
-    pixi run -m dependencies/gluon python src/eqtl_analysis/tp_intarna_pairs.py \
+    pixi run -m dependencies/cnn python src/eqtl_analysis/tp_pairs.py \
         --eqtl data/GTEx_..._pip_gt_0_9_..._merged_with_miRBench_fragments.tsv \
         --eqtl data/GTEx_..._pip_lt_0_01_..._merged_with_miRBench_fragments.tsv \
         --errors errors/AGO2_eCLIP_Manakov2022_train_v7_oof_errtype.tsv \
         --errors errors/manakov_test_errors_v7_restructure.tsv \
         --errors errors/manakov_leftout_errors_v7_restructure.tsv \
-        --out-pairs data/eqtl_tp_pairs.tsv \
-        --mre-fasta data/eqtl_tp_mre.fa --mirna-fasta data/eqtl_tp_mirna.fa
-
-The FASTAs are written one record per pairs-TSV row, in file order, with the
-row index baked into every ID - `intarna_parallel.py` zips the two files, so a
-misalignment has to be visible rather than silent.
+        --out-pairs data/eqtl_tp_pairs.tsv
 """
 from __future__ import annotations
 
 import argparse
 import csv
-import re
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-_ID_SAFE = re.compile(r'[^A-Za-z0-9._-]')
-
 # Columns carried from the error TSV onto each retained pair. `gene` is the
 # 50-nt MRE, already transcript-oriented on both strands.
 _CARRY = ['noncodingRNA_name', 'noncodingRNA_fam', 'feature', 'chr', 'start',
           'end', 'strand', 'dominant_region', 'interaction_probability']
-
-
-def sanitize(name: str) -> str:
-    """IntaRNA takes the ID as a bare command-line token, so keep it boring."""
-    return _ID_SAFE.sub('_', str(name)) if name and str(name) != 'nan' else ''
 
 
 def load_eqtl_pairs(paths: list[str]) -> set[tuple[str, str]]:
@@ -136,8 +124,6 @@ def main() -> int:
     ap.add_argument('--errors', action='append', required=True,
                     help='Error TSV carrying gene/noncodingRNA/error_type (repeatable).')
     ap.add_argument('--out-pairs', required=True, help='Deduplicated pairs TSV.')
-    ap.add_argument('--mre-fasta', required=True)
-    ap.add_argument('--mirna-fasta', required=True)
     ap.add_argument('--min-prob', type=float, default=None,
                     help='Additionally require interaction_probability >= this '
                          '(e.g. 0.7 for high-confidence TPs only). TPs already '
@@ -166,16 +152,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out, sep='\t', index=False)
 
-    with open(args.mre_fasta, 'w') as fm, open(args.mirna_fasta, 'w') as fq:
-        for i, mre, mirna, name in zip(df['pair_index'], df['mre_seq'],
-                                       df['mirna_seq'],
-                                       df.get('noncodingRNA_name', [''] * len(df))):
-            mir_id = sanitize(name)
-            fm.write(f'>mre_{i}\n{mre}\n')
-            fq.write(f">{mir_id + '_' if mir_id else 'mir_'}{i}\n{mirna}\n")
-
     print(f'\nWrote {len(df):,} pairs to {out}')
-    print(f'Wrote {len(df):,} records each to {args.mre_fasta} and {args.mirna_fasta}')
     return 0
 
 
