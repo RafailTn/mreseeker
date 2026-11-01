@@ -1,16 +1,11 @@
-# MREseeker
+# MREseeker (CNN)
 
-Predict whether a microRNA binds a candidate target site (MRE) on an mRNA.
+Predict whether a microRNA binds a candidate target site (MRE) on an mRNA, with a
+**sequence CNN** that reads the raw miRNA and MRE sequences (~0.87 average
+precision; chance = 0.5). No feature-extraction pass is needed, and `explain
+--duplex` reports which bases pair and what kind of site the model relied on.
 
-Two models are trained on the same data: a **sequence CNN** that reads the raw
-miRNA and MRE sequences, and a **CatBoost** model (AutoGluon, `CatBoost_BAG_L1`)
-on 26 IntaRNA / conservation features. Both are benchmarked below against
-published models (average precision; chance = 0.5):
-
-![Benchmark: average precision per model and test set](data/panel_benchmark_saec.png)
-
-The CNN needs only the sequences. CatBoost needs a feature-extraction pass
-(IntaRNA + phyloP) but gives exact per-prediction SHAP explanations.
+`src/eqtl_analysis/` applies the CNN to GTEx eQTLs that fall in miRNA target sites.
 
 Data: miRBench (Gresova et al., 2025), built on the AGO2 chimeric eCLIP of
 Manakov et al. (2022).
@@ -19,17 +14,17 @@ Manakov et al. (2022).
 
 ## Installation
 
-Environments are managed with [Pixi](https://pixi.prefix.dev/latest/installation/).
-Install only the one you need:
+Environments are managed with [Pixi](https://pixi.prefix.dev/latest/installation/):
 
 ```bash
 pixi install --manifest-path dependencies/cnn/pixi.toml    # PyTorch + Optuna (CUDA)
-pixi install --manifest-path dependencies/gluon/pixi.toml  # AutoGluon + IntaRNA + ViennaRNA (~5.4 GB)
+pixi install --manifest-path dependencies/gluon/pixi.toml  # IntaRNA + ViennaRNA, eQTL footprints only
 ```
 
-Each example first enters its environment with `pixi shell`, then runs the script.
-Use the shell rather than the env's Python binary directly: the CatBoost pipeline
-calls `IntaRNA` via `PATH`, and without it fails with `ERROR: IntaRNA not found.`
+The CNN needs only the first. The second provides IntaRNA for the eQTL
+interaction filter (`src/gluon/intarna_parallel.py` →
+`src/eqtl_analysis/filter_eqtls_by_interaction.py`). Enter an environment with
+`pixi shell` rather than calling its Python binary directly, so `IntaRNA` is on `PATH`.
 
 ---
 
@@ -118,79 +113,16 @@ writes can be scored directly with `predict_cnn.py`.
 
 ---
 
-## CatBoost (AutoGluon)
-
-### Predict
-
-`predict_target.py` runs the full chain: IntaRNA → best structure per pair →
-shuffle-background z-scores → feature extraction → prediction.
-
-```bash
-pixi shell --manifest-path dependencies/gluon/pixi.toml
-python3 src/gluon/predict_target.py -target_fasta mre.fa -query_fasta mirna.fa -bigwig data/hg38.phyloP100way.bw -model models_gluon_catboost -o results.tsv -threads 8 [-explain]
-```
-
-- **The FASTAs are paired by position**, not all-vs-all: record *i* of
-  `-target_fasta` is scored against record *i* of `-query_fasta`. Build them from
-  a table with
-  `python3 src/gluon/make_fastas.py --v7 sites.tsv --mre-fasta mre.fa --mirna-fasta mirna.fa`.
-- **Conservation** — give exactly one of `-bigwig` (hg38 phyloP **100-way**; other
-  tracks give different scores) or `-conservation_tsv` (MRE coordinates, optionally
-  with a precomputed `gene_phyloP` column). With neither, the ~9 GB BigWig is
-  downloaded into the working directory.
-- **Shuffle background** — miRNAs missing from `background/mirna_background.tsv`
-  are scored and **appended to that file in place**. Pass a copy via
-  `-mirna_background`, or `-no_extend_background` to leave those features `NaN`.
-- **`-explain`** adds SHAP output: global and per-sample tables plus top-N driver
-  columns. Values are exact TreeSHAP in **log-odds**.
-- Output: a TSV with `interaction_probability` and a thresholded `prediction`
-  (`-threshold`, default 0.5).
-
-`models_gluon_catboost` (27 MB) is a deployment clone of the default model. The
-full AutoGluon stack (`models_gluon`, 6.8 GB, not in git) scores only marginally
-higher (0.8465 vs 0.8430 APS on test) at far greater inference cost.
-
-### Train and evaluate
-
-Features are extracted once per split, then both trainers fit on the fixed 26
-columns (`SELECTED_26` in `src/gluon/feature_extraction.py`) and report metrics
-on the test and leftout sets.
-
-```bash
-pixi shell --manifest-path dependencies/gluon/pixi.toml
-# features from an IntaRNA best-structure table
-python3 src/gluon/feature_extraction.py --intarna best.tsv --mre-fasta mre.fa --mirna-fasta mirna.fa --v7 sites.tsv --output train.csv
-
-# single fit on the full training set
-python3 src/training/gluon/gluon_train_total.py --input train.csv --test test.csv --leftout leftout.csv --modelpath models/gluon_total --time 3600
-
-# stratified group k-fold (grouped by miRNA family)
-python3 src/training/gluon/gluon_training_kfold.py --input train.csv --test test.csv --leftout leftout.csv --folds 5 --modelpath models/gluon_fold --time 3600
-```
-
-Results go to `--results_path` and misclassified rows to `--misclassified_dir`
-(defaults under `results/`). Permutation importance on a trained model:
-
-```bash
-pixi shell --manifest-path dependencies/gluon/pixi.toml
-python3 src/gluon/permutation_importance.py --model models_gluon_catboost --data test.csv --output permutation_importance.tsv --shuffles 10
-```
-
----
-
 ## Repository layout
 
 ```
-src/cnn/              CNN inference (predict_cnn.py)
-src/training/cnn/     CNN model + training CLI, Optuna search
-src/gluon/            CatBoost inference pipeline (predict_target.py), feature extraction
-src/training/gluon/   AutoGluon training, feature selection
-src/benchmark/        model comparison and timing
+src/cnn/              CNN inference (predict_cnn.py), duplex plots (plot_duplex.py)
+src/training/cnn/     CNN model + training/explain CLI, duplex decoder, Optuna search
 src/eqtl_analysis/    GTEx eQTL scoring with the CNN
+src/gluon/            intarna_parallel.py only (IntaRNA runs for the eQTL filter)
 cnn_checkpoints/      shipped CNN checkpoint
-models_gluon_catboost/ shipped CatBoost model
-background/           shuffle-background panel
-dependencies/         Pixi manifests (cnn, gluon, featurewiz)
+data/                 eQTL fragment tables and the TP pair / FASTA sets
+dependencies/         Pixi manifests (cnn, gluon)
 ```
 
 ---
@@ -199,8 +131,5 @@ dependencies/         Pixi manifests (cnn, gluon, featurewiz)
 
 - Gresova, K., et al. (2025). miRBench datasets (v6). Zenodo. https://doi.org/10.5281/zenodo.14734014
 - Manakov, S. A., et al. (2022). Scalable and deep profiling of mRNA targets for individual microRNAs with chimeric eCLIP. bioRxiv. https://doi.org/10.1101/2022.02.13.480296
-- Erickson, N., et al. (2020). AutoGluon-Tabular: Robust and Accurate AutoML for Structured Data. arXiv:2003.06505.
 - Mann, M., Wright, P. R., & Backofen, R. (2017). IntaRNA 2.0. *Nucleic Acids Research*, 45(W1), W435–W439. https://doi.org/10.1093/nar/gkx279
 - Lorenz, R., et al. (2011). ViennaRNA Package 2.0. *Algorithms for Molecular Biology*, 6, 26.
-- Sethupathy, P., Corda, B., & Hatzigeorgiou, A. G. (2006). TarBase. *RNA*, 12(2), 192–197. https://doi.org/10.1261/rna.2239606
-- Seshadri, R. (2020). featurewiz. https://github.com/AutoViML/featurewiz
