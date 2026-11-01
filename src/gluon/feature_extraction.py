@@ -348,6 +348,25 @@ def get_paired_bases_with_positions(total_vec, mre_binding_seq, mirna_binding_se
     return "".join(paired_mre), "".join(paired_mir), mirna_positions_in_full
 
 
+def target_base_at_t1(site_data, total_vec, mre_coord_end, mirna_binding_start):
+    """Target base opposite miRNA position 1 ('' if it cannot be placed).
+
+    That is the base just 3' of miRNA position 2's partner - the base AGO reads for
+    the "A1" site sub-types whatever the miRNA's own first base is. Position 2 must be
+    paired in the duplex; the indexing mirrors get_mre_positions_for_seed.
+    """
+    mirna_pos_map = get_mirna_position_map(total_vec)
+    mre_pos_map = get_mre_position_map(total_vec)
+    mre_seq = (site_data.get('mre_seq') or '').upper().replace('T', 'U')
+    for vec_idx, char in enumerate(total_vec):
+        mir = mirna_pos_map.get(vec_idx)
+        if char != '1' or mir is None or mir + mirna_binding_start != 1:
+            continue
+        t1 = (mre_coord_end - 1) - mre_pos_map[vec_idx] + 1
+        return mre_seq[t1] if 0 <= t1 < len(mre_seq) else ''
+    return ''
+
+
 def get_mre_positions_for_seed(site_data, mirna_binding_start):
     total_vec = site_data['total_vec']
     mre_binding_end = site_data['mre_coord_end'] - 1
@@ -1077,10 +1096,15 @@ def calculate_intarna_features(site_data, flank_size=10, hist_range=PHYLOP_HIST_
     site_data['consecutive_matches_minus_seed'] = get_max_consecutive_char(non_seed_vec, '1')
     site_data['non_seed_matches'] = non_seed_vec.count('1')
 
+    # First paired miRNA position, 1-based on the full miRNA. hybrid_dp covers only the
+    # interacting subsequences (which start on a pair), so the offset into it is almost
+    # always 0 and the position is carried by start_query.
     try:
-        site_data['start_match_seed'] = mirna_struct.index(')') + 1
+        site_data['start_match_seed'] = mirna_coord_start + mirna_struct.index(')')
     except ValueError:
         site_data['start_match_seed'] = 99
+    site_data['t1_A'] = target_base_at_t1(site_data, total_vec, mre_coord_end,
+                                          mirna_binding_start) == 'A'
 
     all_paired_mre, all_paired_mir, mirna_positions = get_paired_bases_with_positions(
         total_vec, mre_binding_subseq[::-1], mirna_binding_subseq,
@@ -1170,17 +1194,18 @@ def classify_binding_type_detailed(d):
             return "3prime.compensatory"
         return btype
 
-    mirna_seq = d.get('mirna_seq', '')
     start_match = d.get('start_match_seed', 99)
+    # A1 sub-types: an A on the TARGET opposite miRNA position 1 (t1A), with the seed
+    # beginning at position 2 (position 1 itself may pair, as U1·A does). Same rule as
+    # src/training/cnn/binding_types.py.
+    t1A = d.get('t1_A', False) and start_match <= 2
 
-    if btype == "8mer" and start_match == 2 and mirna_seq and mirna_seq[0] == 'A':
-        btype = "8mer1A"
-    elif btype == "7mer" and start_match == 2 and mirna_seq and mirna_seq[0] == 'A':
+    if btype in ("8mer", "7mer") and t1A:
         btype = "8mer1A"
     elif btype == "6mer":
         if start_match == 3:
             btype = "offset6mer"
-        elif start_match == 2 and mirna_seq and mirna_seq[0] == 'A':
+        elif t1A:
             btype = "7mer1A"
 
     if 'mer' in btype:

@@ -33,7 +33,11 @@ best_hparams_mirbind.json
 # ── Data ──────────────────────────────────────────────────────────────────
 # The shuffle-background table and its frozen panel moved to background/, so
 # the scripts can default to them; nothing under data/ needs re-including.
-
+data/gse304955_novel_labelled_v7.tsv
+data/*mirna*.fa
+data/*mirna*.fasta
+data/*mre*.fa
+data/*mre*.fasta
 # predict_target.py downloads hg38.phyloP100way.bw from UCSC into the working
 # directory when -bigwig is not given, so it lands wherever the run started.
 *.bw

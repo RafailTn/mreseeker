@@ -77,8 +77,10 @@ except ImportError:
 # package-style when imported as cnn.cnn_branches_mirbind.
 try:
     import binding_types as _bt
+    import duplex_decode as _dd
 except ImportError:
     from cnn import binding_types as _bt
+    from cnn import duplex_decode as _dd
 
 
 # ---------------------------------------------------------------------------
@@ -595,7 +597,13 @@ class MiRNAInteractionDataset(Dataset):
     ignores them (``seq_cons_channels=False``), so the extra tensors cost a slice
     copy and nothing else.  Keeping the arity fixed means every call site unpacks
     the same shape whether or not the feature is enabled.
+
+    The one exception is ``return_index``: ELR training (``--loss elr``) sets it
+    on the train set so each item also carries its row index (a 6th element),
+    which keys the per-sample target buffer.  Nothing else turns it on.
     """
+
+    return_index = False
 
     def __init__(
         self,
@@ -711,13 +719,14 @@ class MiRNAInteractionDataset(Dataset):
         return len(self.mirna_idx)
 
     def __getitem__(self, idx: int):
-        return (
+        item = (
             torch.from_numpy(self.mirna_idx[idx]),          # (MAX_MIRNA,) int8
             torch.from_numpy(self.mre_idx[idx]),            # (MRE_LEN,)   int8
             torch.from_numpy(self.mirna_cons[idx]),         # (MAX_MIRNA,) float32
             torch.from_numpy(self.mre_cons[idx]),           # (MRE_LEN,)   float32
             int(self.labels[idx]),
         )
+        return item + (idx,) if self.return_index else item
 
 
 # ---------------------------------------------------------------------------
@@ -1397,6 +1406,10 @@ def _compute_loss(logits: torch.Tensor, labels: torch.Tensor,
         alpha*CE + beta*RCE, where RCE swaps the roles of prediction and
         (clamped) target. Ignores pos_weight and gamma.
 
+    loss_type="elr" → plain BCE here (incl. pos_weight). The early-learning
+        regularizer needs per-sample state, so the training loop adds it via
+        _elr_penalty; evaluation therefore reports BCE.
+
     Ported from the two-tower model (transformers/two_tower_imp.py) so the same
     noise-robust losses can be tried here.
     """
@@ -1413,8 +1426,8 @@ def _compute_loss(logits: torch.Tensor, labels: torch.Tensor,
         rce = -(p * torch.log(y) + (1.0 - p) * torch.log(1.0 - y)).mean()
         return sce_alpha * ce + sce_beta * rce
 
-    if loss_type != "bce":
-        raise ValueError(f"loss_type must be 'bce', 'gce' or 'sce', got {loss_type!r}")
+    if loss_type not in ("bce", "elr"):
+        raise ValueError(f"loss_type must be 'bce', 'gce', 'sce' or 'elr', got {loss_type!r}")
 
     if gamma == 0.0:
         return F.binary_cross_entropy_with_logits(
@@ -1424,6 +1437,26 @@ def _compute_loss(logits: torch.Tensor, labels: torch.Tensor,
     pt  = torch.sigmoid(logits)
     pt  = torch.where(labels == 1, pt, 1.0 - pt)   # prob of the correct class
     return ((1.0 - pt) ** gamma * bce).mean()
+
+
+def _elr_penalty(logits: torch.Tensor, idx: torch.Tensor, target: torch.Tensor,
+                 beta: float, lam: float, eps: float = 1e-4) -> torch.Tensor:
+    """Early-learning regularization (Liu et al. 2020), binary form.
+
+    ``target`` (N, 2) holds a per-sample running average of the model's own
+    (detached) class probabilities, updated each time the sample is drawn:
+    t ← beta·t + (1-beta)·p.  The penalty lam·log(1 - <p, t>) pulls predictions
+    toward those early-learning targets, so a sample whose label the model
+    disagreed with early on is not later memorised.  Targets start at zero, so
+    the term is inactive on a sample's first visit.  Mirrors the reference
+    implementation (clamp, then update target in place before the inner product).
+    """
+    p     = torch.sigmoid(logits).clamp(min=eps, max=1.0 - eps)
+    probs = torch.stack([1.0 - p, p], dim=1)
+    with torch.no_grad():
+        target[idx] = beta * target[idx] + (1.0 - beta) * probs
+    inner = (probs * target[idx]).sum(dim=1)
+    return lam * torch.log(1.0 - inner).mean()
 
 
 @torch.no_grad()
@@ -1859,10 +1892,10 @@ def _train_one_run(
         sce_beta=getattr(args, "sce_beta", 1.0),
     )
 
-    # pos_weight and focal gamma only apply to the BCE loss; the noise-robust
-    # losses (gce/sce) ignore them, so skip the pos_weight computation there.
+    # pos_weight and focal gamma only apply to the BCE loss (and ELR, which is
+    # BCE + a regularizer); gce/sce ignore them, so skip the pos_weight there.
     pos_weight: Optional[torch.Tensor] = None
-    if loss_type == "bce" and not args.balance and gamma == 0.0:
+    if loss_type in ("bce", "elr") and not args.balance and gamma == 0.0:
         n_pos = int(train_ds.labels.sum())
         n_neg = len(train_ds.labels) - n_pos
         if n_pos > 0 and n_neg > 0:
@@ -1879,7 +1912,16 @@ def _train_one_run(
     elif gamma > 0.0:
         print(f"  Focal loss enabled (gamma={gamma}, pos_weight disabled)")
 
-    optim = torch.optim.AdamW(
+    elr_target: Optional[torch.Tensor] = None
+    elr_beta, elr_lambda = getattr(args, "elr_beta", 0.7), getattr(args, "elr_lambda", 3.0)
+    if loss_type == "elr":
+        # Set before the loader's workers start (lazily, on first iteration), so
+        # they inherit the flag.
+        train_ds.return_index = True
+        elr_target = torch.zeros(len(train_ds), 2, device=device)
+        print(f"  ELR enabled (beta={elr_beta}, lambda={elr_lambda})")
+
+    optim =torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     total_steps  = args.epochs * max(1, len(train_loader))
     warmup_steps = min(args.warmup_steps, total_steps // 10)
@@ -1913,7 +1955,7 @@ def _train_one_run(
         seen = 0
         train_logits_buf, train_labels_buf = [], []
 
-        for mi, ti, cm, ct, labels in train_loader:
+        for mi, ti, cm, ct, labels, *idx in train_loader:
             mi     = mi.to(device,     non_blocking=True)
             ti     = ti.to(device,     non_blocking=True)
             cm     = cm.to(device,     non_blocking=True)
@@ -1922,6 +1964,9 @@ def _train_one_run(
 
             logits = model(mi, ti, cm, ct)
             loss   = _compute_loss(logits, labels, pos_weight, gamma, **loss_kwargs)
+            if elr_target is not None:
+                loss = loss + _elr_penalty(logits, idx[0].to(device), elr_target,
+                                           elr_beta, elr_lambda)
 
             optim.zero_grad(set_to_none=True)
             loss.backward()
@@ -2591,6 +2636,32 @@ def _occlusion_attribution(model: MiRBindCNN, wc: torch.Tensor) -> torch.Tensor:
     return out
 
 
+def _duplex_region_masks(mre_j: np.ndarray, kind: np.ndarray,
+                         rng: np.random.Generator,
+                         valid: np.ndarray) -> dict[str, np.ndarray]:
+    """(B, MAX_MIRNA, MRE_LEN) boolean occlusion masks over the decoded duplex.
+
+    One mask per miRNA region (path cells only — bulges have no cell), one for
+    the whole duplex, and a ``random`` control occluding as many randomly chosen
+    real cells as the whole duplex has, so Δlogit(duplex) can be read against
+    Δlogit(any cells of that size).
+    """
+    B = len(kind)
+    masks = {r: np.zeros((B, MAX_MIRNA, MRE_LEN), dtype=bool)
+             for r in list(_dd.REGIONS) + ["duplex", "random"]}
+    for b in range(B):
+        for name, sl in _dd.REGIONS.items():
+            ii, jj = _dd.path_cells(mre_j[b], kind[b], sl)
+            masks[name][b, ii, jj] = True
+            masks["duplex"][b, ii, jj] = True
+        n = int(masks["duplex"][b].sum())
+        real = np.flatnonzero(valid[b].ravel())
+        if n and real.size:
+            pick = rng.choice(real, size=min(n, real.size), replace=False)
+            masks["random"][b].ravel()[pick] = True
+    return masks
+
+
 def cmd_explain(args: argparse.Namespace) -> None:
     """Per-sample attribution of the binding logit onto MRE positions.
 
@@ -2605,10 +2676,31 @@ def cmd_explain(args: argparse.Namespace) -> None:
     one ``mre_pos_XX`` column per MRE position.  With ``--dump-matrix`` (IG only)
     it also saves the full channel-summed (N, MAX_MIRNA, MRE_LEN) attribution
     tensor as .npz for per-pair (miRNA×MRE) heatmaps.
+
+    With ``--duplex`` (IG only) the attribution map is also decoded into the
+    explicit duplex the model relied on (``duplex_decode.decode_duplex``: an
+    antiparallel alignment through the matrix steered by the attribution), and
+    each row gains:
+      duplex_type   binding type of that duplex (binding_types names, + .bulge)
+      seq_type      strict-register sequence-only type, for comparison
+      duplex_pairs  pos:j:kind:attr per miRNA position (1-based pos, 0-based j)
+      dlogit_<r>    logit drop when the duplex cells of miRNA region r (seed 1–8,
+                    central 9–12, supp 13–17, tail 18+, whole duplex) are zeroed
+                    — the same zero baseline IG uses; dlogit_random zeroes as
+                    many random real cells as the duplex has (control)
+      attr_<r>      IG mass on those cells
+      duplex_frac   positive IG mass on the duplex / all positive IG mass
+    ``--duplex-report`` writes an ASCII diagram per row; ``--dump-matrix`` then
+    also stores the decoded duplex (duplex_j / duplex_kind / duplex_tbulge).
+    All attribution and dlogit values are in logits.
     """
-    if args.method == "occlusion" and args.dump_matrix:
-        sys.exit("ERROR: --dump-matrix is only available for --method ig "
-                 "(occlusion does not produce a full per-cell matrix).")
+    if args.method == "occlusion" and (args.dump_matrix or args.duplex
+                                       or args.duplex_report):
+        sys.exit("ERROR: --dump-matrix / --duplex / --duplex-report are only "
+                 "available for --method ig (occlusion does not produce a full "
+                 "per-cell matrix).")
+    if args.duplex_report:
+        args.duplex = True
 
     device = torch.device(args.device)
     model, ckpt = _load_ckpt_model(args.checkpoint, device)
@@ -2626,7 +2718,10 @@ def cmd_explain(args: argparse.Namespace) -> None:
     per_pos_batches: list[np.ndarray] = []
     logit_batches:   list[np.ndarray] = []
     base_batches:    list[np.ndarray] = []
-    mat_batches: Optional[list[np.ndarray]] = [] if args.dump_matrix else None
+    keep_mat = bool(args.dump_matrix or args.duplex)
+    mat_batches: Optional[list[np.ndarray]] = [] if keep_mat else None
+    dup_batches: dict[str, list[np.ndarray]] = {}
+    rng = np.random.default_rng(0)
 
     with torch.no_grad():
         for mi, ti, cm, ct, _labels in loader:
@@ -2644,6 +2739,27 @@ def cmd_explain(args: argparse.Namespace) -> None:
                 per_pos = ig.sum(dim=(1, 2))                       # (B, MRE_LEN)
                 if mat_batches is not None:
                     mat_batches.append(ig.sum(dim=1).cpu().numpy())  # (B, 30, 50)
+                if args.duplex:
+                    attr_np = mat_batches[-1]
+                    mi_np, ti_np = mi.cpu().numpy(), ti.cpu().numpy()
+                    mj, kd, tb = _dd.decode_duplex(mi_np, ti_np, attr_np,
+                                                   lam=args.duplex_lambda)
+                    valid = (mi_np < 4)[:, :, None] & (ti_np < 4)[:, None, :]
+                    out = {"duplex_j": mj, "duplex_kind": kd, "duplex_tbulge": tb}
+                    masks = _duplex_region_masks(mj, kd, rng, valid)
+                    for name, m in masks.items():
+                        mt  = torch.from_numpy(m).to(device)
+                        occ = wc * (~mt).unsqueeze(1).to(wc.dtype)
+                        out[f"dlogit_{name}"] = (logit - model.logits_from_matrix(occ)
+                                                 ).cpu().numpy()
+                        if name != "random":
+                            out[f"attr_{name}"] = (attr_np * m).sum(axis=(1, 2))
+                    pos = np.clip(attr_np, 0, None)
+                    dm  = masks["duplex"]
+                    out["duplex_frac"] = ((pos * dm).sum(axis=(1, 2))
+                                          / np.maximum(pos.sum(axis=(1, 2)), 1e-12))
+                    for k, v in out.items():
+                        dup_batches.setdefault(k, []).append(v)
             else:
                 per_pos = _occlusion_attribution(model, wc)        # (B, MRE_LEN)
 
@@ -2663,6 +2779,20 @@ def cmd_explain(args: argparse.Namespace) -> None:
     df["attr_total"]     = per_pos.sum(axis=1)
     for j in range(MRE_LEN):
         df[f"mre_pos_{j:02d}"] = per_pos[:, j]
+
+    dup: dict[str, np.ndarray] = {k: np.concatenate(v) for k, v in dup_batches.items()}
+    if args.duplex:
+        mat = np.concatenate(mat_batches)
+        mj, kd, tb = dup["duplex_j"], dup["duplex_kind"], dup["duplex_tbulge"]
+        df["duplex_type"] = [_dd.classify_duplex(ds.mirna_idx[n], ds.mre_idx[n],
+                                                mj[n], kd[n], tb[n])
+                             for n in range(len(df))]
+        df["seq_type"]    = _bt.classify_index_arrays(ds.mirna_idx, ds.mre_idx)
+        df["duplex_pairs"] = [_dd.format_pairs(ds.mirna_idx[n], mj[n], kd[n], mat[n])
+                              for n in range(len(df))]
+        for k in sorted(k for k in dup if k.startswith(("dlogit_", "attr_"))):
+            df[k] = dup[k]
+        df["duplex_frac"] = dup["duplex_frac"]
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2686,14 +2816,45 @@ def cmd_explain(args: argparse.Namespace) -> None:
         print(f"    pos {j:2d}: mean|attr|={mabs[j]:.4f}  "
               f"mean_signed={per_pos[:, j].mean():+.4f}")
 
-    if mat_batches is not None:
+    if args.duplex:
+        print(f"  duplex (lambda={args.duplex_lambda}): "
+              f"duplex_type == seq_type on {(df['duplex_type'] == df['seq_type']).mean():.1%}"
+              f" of rows; mean dlogit duplex={df['dlogit_duplex'].mean():+.3f} vs "
+              f"random={df['dlogit_random'].mean():+.3f}")
+        conf = df["prob"] >= 0.5
+        if conf.any():
+            print("  predicted binders, mean dlogit by region: " + "  ".join(
+                f"{r}={df.loc[conf, f'dlogit_{r}'].mean():+.3f}" for r in _dd.REGIONS))
+
+    if args.duplex_report:
+        order = np.argsort(-probs)
+        if args.report_top:
+            order = order[:args.report_top]
+        rpath = Path(args.duplex_report)
+        rpath.parent.mkdir(parents=True, exist_ok=True)
+        with open(rpath, "w") as fh:
+            for n in order:
+                row = df.iloc[n]
+                fh.write(f"## row {n}  prob={row['prob']:.3f}  "
+                         f"duplex_type={row['duplex_type']}  seq_type={row['seq_type']}\n")
+                fh.write("   dlogit " + "  ".join(
+                    f"{r}={row[f'dlogit_{r}']:+.2f}"
+                    for r in list(_dd.REGIONS) + ["duplex", "random"])
+                    + f"  duplex_frac={row['duplex_frac']:.2f}\n")
+                fh.write(_dd.render_duplex(ds.mirna_idx[n], ds.mre_idx[n],
+                                           mj[n], kd[n], tb[n]) + "\n\n")
+        print(f"  Wrote duplex report ({len(order)} rows) → {rpath}")
+
+    if args.dump_matrix:
         mat   = np.concatenate(mat_batches)        # (N, MAX_MIRNA, MRE_LEN)
         mpath = Path(args.dump_matrix)
         mpath.parent.mkdir(parents=True, exist_ok=True)
+        extra = {k: dup[k] for k in ("duplex_j", "duplex_kind", "duplex_tbulge")
+                 if k in dup}
         np.savez_compressed(
             mpath, attribution=mat.astype(np.float32),
             mirna_idx=ds.mirna_idx, mre_idx=ds.mre_idx,
-            logit=logits, prob=probs)
+            logit=logits, prob=probs, **extra)
         print(f"  Wrote full (N, {MAX_MIRNA}, {MRE_LEN}) attribution tensor "
               f"→ {mpath}")
 
@@ -2852,12 +3013,21 @@ def main() -> int:
                          "When gamma>0, the loss-level pos_weight is disabled "
                          "(focal already handles imbalance); pass --balance to "
                          "use sampler oversampling instead.")
-    tr.add_argument("--loss", choices=["bce", "gce", "sce"], default="bce",
+    tr.add_argument("--loss", choices=["bce", "gce", "sce", "elr"], default="bce",
                     help="Classification loss. bce=BCE(+focal gamma/pos_weight); "
                          "gce=Generalized CE (Zhang & Sabuncu 2018); "
                          "sce=Symmetric CE (Wang et al. 2019). gce/sce are "
                          "noise-robust (mislabeled negatives with accidental seed "
-                         "matches) and ignore --focal-gamma / pos_weight.")
+                         "matches) and ignore --focal-gamma / pos_weight. "
+                         "elr=BCE + early-learning regularization (Liu et al. "
+                         "2020): pulls each sample toward a running average of "
+                         "the model's own early predictions so noisy labels are "
+                         "not memorised.")
+    tr.add_argument("--elr-beta", type=float, default=0.7, dest="elr_beta",
+                    help="ELR target momentum: t <- beta*t + (1-beta)*p, updated "
+                         "each time a sample is drawn. Only used with --loss elr.")
+    tr.add_argument("--elr-lambda", type=float, default=3.0, dest="elr_lambda",
+                    help="ELR regularizer weight. Only used with --loss elr.")
     tr.add_argument("--gce-q", type=float, default=0.7, dest="gce_q",
                     help="GCE q in (0,1]: q->0 behaves like CE, q->1 like MAE "
                          "(more noise-robust). Only used with --loss gce.")
@@ -2966,6 +3136,19 @@ def main() -> int:
                     help="Also save the full channel-summed (N, MAX_MIRNA, "
                          "MRE_LEN) attribution tensor as .npz (IG only) for "
                          "per-pair (miRNA×MRE) heatmaps.")
+    ex.add_argument("--duplex", action="store_true",
+                    help="Decode the attribution map into the base-pair duplex the "
+                         "model used and add duplex_type / duplex_pairs / per-region "
+                         "dlogit columns (IG only; see duplex_decode.py).")
+    ex.add_argument("--duplex-lambda", type=float, default=_dd.DEFAULT_LAMBDA,
+                    dest="duplex_lambda",
+                    help="Weight of the (max-normalised) attribution against the "
+                         "pairing chemistry when decoding; 0 = sequence-only duplex.")
+    ex.add_argument("--duplex-report", default=None, dest="duplex_report",
+                    help="Write an ASCII duplex diagram per row (implies --duplex), "
+                         "sorted by prob.")
+    ex.add_argument("--report-top", type=int, default=0, dest="report_top",
+                    help="Limit --duplex-report to the N highest-prob rows (0 = all).")
     ex.add_argument("--batch-size", type=int,  default=256)
     ex.add_argument("--num-workers", type=int, default=4, dest="num_workers")
     ex.add_argument("--mre-col",   default="mre_sequence",   dest="mre_col")

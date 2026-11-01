@@ -22,7 +22,9 @@ from __future__ import annotations
 import numpy as np
 
 # Bump when the classification logic changes so cached labels are invalidated.
-CLASSIFIER_VERSION = 1
+# v2: the '1A' sub-types test the TARGET base opposite miRNA position 1 (t1A),
+#     not the miRNA's own first base, and no longer require position 1 unpaired.
+CLASSIFIER_VERSION = 2
 
 # Non-canonical (decoy-like) categories with stable names — the ones worth
 # targeting for undersampling.  Canonical "*mer*" subtypes carry variable
@@ -95,6 +97,25 @@ def _antidiag_features_idx(mi: np.ndarray, ti: np.ndarray) -> dict:
             p_wc[i] = bool(_WC[mi[i], ti[j]])
             p_gu[i] = bool(_GU[mi[i], ti[j]])
 
+    # t1: the target base opposite miRNA position 1 — on this register, j = best.
+    t1 = int(ti[best]) if 0 <= best < ti_len else 4
+    return _features_from_pairs(p_wc, p_gu, t1, mi_len)
+
+
+def _features_from_pairs(p_wc: np.ndarray, p_gu: np.ndarray,
+                         t1: int, mi_len: int) -> dict:
+    """Classification features from per-miRNA-position pairing flags.
+
+    ``p_wc`` / ``p_gu`` (length _MAX_MI, bool) say whether miRNA position i is
+    Watson-Crick / G·U paired in whatever duplex the caller chose — the strict
+    best register above, or a bulge-tolerant alignment (duplex_decode.py).
+    Keeping this separate is what lets both paths share one cascade.
+
+    ``t1`` is the nucleotide index of the target base opposite miRNA position 1
+    (4 if there is none) — the base AGO reads for the "A1" site sub-types.  It is
+    recognised in its own pocket whatever the miRNA's position-1 base is, so this
+    is deliberately the target base, not ``mi[0]``.
+    """
     any_pair = p_wc | p_gu
 
     # seed = miRNA positions 2–8, 0-indexed 1–7
@@ -115,14 +136,16 @@ def _antidiag_features_idx(mi: np.ndarray, ti: np.ndarray) -> dict:
         "gu_in_seed":      int(seed_gu.sum()),
         "eff_3prime":      int(p_wc[8:mi_len].sum()),    # WC-only outside seed
         "consec_centered": _max_consec(any_pair[4:16]),  # positions 5–16
-        "pos1_A":          bool(mi[0] == _NUC["A"]),
+        "t1_A":            t1 == _NUC["A"],
     }
 
 
 def _classify_from_features(f: dict) -> str:
     consec = f["consec_seed"]
     start  = f["start_match"]
-    pos1_A = f["pos1_A"]
+    # A1 sub-types need the seed to begin at position 2 (start <= 2: position 1
+    # itself may pair, as U1·A does) and an A on the target opposite position 1.
+    t1A    = f["t1_A"] and start <= 2
 
     if f["total_1_9"] == 9:
         btype = "9mer"
@@ -141,14 +164,12 @@ def _classify_from_features(f: dict) -> str:
         return "seedless"
 
     # canonical sub-types (mirroring feature_extraction.py)
-    if btype == "8mer" and start == 2 and pos1_A:
-        btype = "8mer1A"
-    elif btype == "7mer" and start == 2 and pos1_A:
+    if btype in ("8mer", "7mer") and t1A:
         btype = "8mer1A"
     elif btype == "6mer":
         if start == 3:
             btype = "offset6mer"
-        elif start == 2 and pos1_A:
+        elif t1A:
             btype = "7mer1A"
 
     if "mer" in btype:

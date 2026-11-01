@@ -20,6 +20,7 @@ transformers = ">=5.10.2,<6"
 pybigwig = ">=0.3.23,<0.4"
 pyfaidx = ">=0.9.0.4,<0.10"
 samtools = ">=1.23,<2"
+pysam = ">=0.24.1,<0.25"
 
 [pypi-dependencies]
 lightning = ">=2.5.6, <3"
