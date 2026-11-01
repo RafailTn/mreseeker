@@ -70,7 +70,8 @@ OURS = {"this work: sequence CNN": "sequence CNN"}
 def measured() -> dict[str, tuple[float, ...]]:
     """The published predictors, as re-run over all five sets."""
     if not MEASURED.exists():
-        raise SystemExit(f"{MEASURED} not found; run the miRBench evaluation first")
+        raise SystemExit(f"{MEASURED} not found; it is tracked in git - restore it with "
+                         f"`git checkout -- {MEASURED.relative_to(REPO)}`")
     df = pd.read_csv(MEASURED)
     df["dataset"] = df["dataset"].map(DATASET_ALIAS).fillna(df["dataset"])
     out = {}
@@ -86,7 +87,8 @@ def measured() -> dict[str, tuple[float, ...]]:
 
 def ours_from_head_to_head() -> dict[str, tuple[float, ...]]:
     if not H2H.exists():
-        raise SystemExit(f"{H2H} not found; run src/benchmark/head_to_head.py first")
+        raise SystemExit(f"{H2H} not found; it is tracked in git - restore it with "
+                         f"`git checkout -- {H2H.relative_to(REPO)}`")
     df = pd.read_csv(H2H)
     out = {}
     for label, model in OURS.items():

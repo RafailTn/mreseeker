@@ -7,9 +7,9 @@ precision; chance = 0.5). No feature-extraction pass is needed, and `explain
 
 ![Benchmark: average precision per model and test set](data/panel_benchmark_saec.png)
 
-Published miRBench predictors re-run over the same five sets
-(`src/figures/panel_benchmark_saec.py`, from `results/head_to_head.csv` and
-`results/mirbench_predictor_evaluation.csv`).
+Published miRBench predictors re-run over the same five sets. Redraw with
+`python3 src/figures/panel_benchmark_saec.py`, from `results/head_to_head.csv` and
+`results/mirbench_predictor_evaluation.csv` (the only tracked files under `results/`).
 
 `src/eqtl_analysis/` applies the CNN to GTEx eQTLs that fall in miRNA target sites.
 
@@ -55,19 +55,20 @@ python3 src/training/cnn/cnn_branches_mirbind.py train --train train.tsv --val v
 - `--folds K` — stratified group k-fold by miRNA family, writes `*_fold{1..K}.pt`.
 - `--oof-out FILE` — with `--folds`, also writes out-of-fold predictions.
 - `--no-val` — fit on the full training set without a validation split.
-- `--test` — scores one or more labelled sets with the final checkpoint.
+- `--test` — scores one or more labelled sets with the saved checkpoint (best validation epoch, or the last one with `--no-val`).
 
 ### Evaluate
 
-Scoring a labelled file (a `label` column) prints metrics:
+Scoring a labelled file (a `label` column) prints metrics. Every subcommand defaults to
+`mre_sequence` / `mirna_sequence` columns, so v7 tables need `--mre-col gene --mirna-col noncodingRNA`:
 
 ```bash
 pixi shell --manifest-path dependencies/cnn/pixi.toml
 # single checkpoint
-python3 src/training/cnn/cnn_branches_mirbind.py predict --checkpoint cnn_checkpoints/cnn_mirbind.pt --input test.tsv --output test_pred.tsv [--error-dump errors.tsv]
+python3 src/training/cnn/cnn_branches_mirbind.py predict --checkpoint cnn_checkpoints/cnn_mirbind.pt --input test.tsv --output test_pred.tsv --mre-col gene --mirna-col noncodingRNA [--error-dump errors.tsv]
 
 # average of k-fold checkpoints over several test sets
-python3 src/training/cnn/cnn_branches_mirbind.py predict-ensemble --checkpoints cnn_checkpoints/cnn_mirbind_fold*.pt --inputs test.tsv leftout.tsv --output-dir predictions
+python3 src/training/cnn/cnn_branches_mirbind.py predict-ensemble --checkpoints cnn_checkpoints/cnn_mirbind_fold*.pt --inputs test.tsv leftout.tsv --output-dir predictions --mre-col gene --mirna-col noncodingRNA
 ```
 
 ### Explain: which bases pair, and what kind of site
@@ -107,7 +108,7 @@ On low-scoring pairs the attribution is diffuse and the decoded duplex is mostly
 
 ```bash
 pixi shell --manifest-path dependencies/cnn/pixi.toml
-python3 src/training/cnn/optuna_cnn_mirbind.py --train train.tsv --val val.tsv --trials 50 --epochs 30 --ckpt-dir optuna_ckpts --storage optuna_mirbind.db
+python3 src/training/cnn/optuna_cnn_mirbind.py --train train.tsv --val val.tsv --mre-col gene --mirna-col noncodingRNA --trials 50 --epochs 30 --ckpt-dir optuna_ckpts --storage optuna_mirbind.db
 ```
 
 Maximises validation AUPRC (TPE sampler, median pruner). Every checkpoint it

@@ -2173,6 +2173,27 @@ def _run_single(args: argparse.Namespace, device: torch.device) -> None:
     _train_one_run(model, train_loader, val_loader, train_ds,
                    model_args, args, device, out_path)
 
+    if args.test:
+        # Score with the checkpoint on disk (best-val, or last epoch with
+        # --no-val), not the in-memory weights, so the numbers match what a
+        # later `predict` on that file would print.
+        best_ckpt = torch.load(out_path, map_location=device, weights_only=False)
+        model.load_state_dict(best_ckpt["model_state"])
+        print(f"\nTest-set evaluation ({out_path.name}):")
+        for test_path in args.test:
+            test_ds = MiRNAInteractionDataset.from_df(
+                _read_table(test_path),
+                has_labels=True,
+                mre_col=args.mre_col, mirna_col=args.mirna_col,
+                **_cons_kwargs(args))
+            test_loader = _make_loader(
+                test_ds, args.batch_size, shuffle=False,
+                num_workers=args.num_workers)
+            logits, labels = predict_logits(model, test_loader, device)
+            metrics = _metrics_from_probs(1.0 / (1.0 + np.exp(-logits)), labels)
+            row = "  ".join(f"{k}={v:.4f}" for k, v in metrics.items())
+            print(f"  [{Path(test_path).stem}]  {row}")
+
     if HAS_WANDB and wandb.run is not None:
         wandb.finish()
 

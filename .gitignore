@@ -43,6 +43,9 @@ data/*mre*.fasta
 *.bw
 
 # ── Results ───────────────────────────────────────────────────────────────
-results/
+results/*
+# Inputs of src/figures/panel_benchmark_saec.py (the README benchmark panel).
+!results/head_to_head.csv
+!results/mirbench_predictor_evaluation.csv
 eqtl_results_cnn.tsv
 permutation_importance.tsv
