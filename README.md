@@ -5,6 +5,12 @@ Predict whether a microRNA binds a candidate target site (MRE) on an mRNA, with 
 precision; chance = 0.5). No feature-extraction pass is needed, and `explain
 --duplex` reports which bases pair and what kind of site the model relied on.
 
+![Benchmark: average precision per model and test set](data/panel_benchmark_saec.png)
+
+Published miRBench predictors re-run over the same five sets
+(`src/figures/panel_benchmark_saec.py`, from `results/head_to_head.csv` and
+`results/mirbench_predictor_evaluation.csv`).
+
 `src/eqtl_analysis/` applies the CNN to GTEx eQTLs that fall in miRNA target sites.
 
 Data: miRBench (Gresova et al., 2025), built on the AGO2 chimeric eCLIP of
@@ -115,6 +121,7 @@ writes can be scored directly with `predict_cnn.py`.
 src/cnn/              CNN inference (predict_cnn.py), duplex plots (plot_duplex.py)
 src/training/cnn/     CNN model + training/explain CLI, duplex decoder, Optuna search
 src/eqtl_analysis/    GTEx eQTL scoring with the CNN
+src/figures/          README benchmark panel (+ poster_style.py palette)
 cnn_checkpoints/      shipped CNN checkpoint
 data/                 eQTL fragment tables and the CNN-TP pair sets
 dependencies/cnn/     Pixi manifest
