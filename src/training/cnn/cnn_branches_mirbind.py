@@ -87,7 +87,10 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 
-MRE_LEN   = 50
+# MRE window length. Override with MRESEEKER_MRE_LEN (e.g. 150 for the 150-nt models);
+# the network pools adaptively, so only encoding/caches depend on it. Use the same value
+# for training and prediction of a checkpoint.
+MRE_LEN   = int(os.environ.get("MRESEEKER_MRE_LEN", "50"))
 MAX_MIRNA = 30
 
 # Watson-Crick + G·U wobble complementarity (RNA)

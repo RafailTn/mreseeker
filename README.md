@@ -114,6 +114,80 @@ python3 src/training/cnn/optuna_cnn_mirbind.py --train train.tsv --val val.tsv -
 Maximises validation AUPRC (TPE sampler, median pruner). Every checkpoint it
 writes can be scored directly with `predict_cnn.py`.
 
+### Wider MRE windows (150 / 225 / 300 nt)
+
+The shipped CNN sees the 50-nt chimera window. These checkpoints see the same window plus genomic
+flank on each side (mRNA sense), so they can use sites and context just outside it:
+
+| checkpoint | window | flank 5' / 3' | MRE column | `MRESEEKER_MRE_LEN` |
+|---|---|---|---|---|
+| `cnn_checkpoints/cnn_mre150.pt` | 150 nt | 50 / 50 | `gene150` | `150` |
+| `cnn_checkpoints/cnn_mre225.pt` | 225 nt | 50 / 125 | `gene225` | `225` |
+| `cnn_checkpoints/cnn_mre300.pt` | 300 nt | 125 / 125 | `gene300` | `300` |
+
+**The window length is not stored in the checkpoint.** Set `MRESEEKER_MRE_LEN` to the value above for
+both training and prediction. The network pools adaptively, so a wrong value still loads and
+runs without an error, but the MRE is padded or truncated and the scores are wrong. Unset, it defaults to 50,
+the shipped model.
+
+```bash
+MRESEEKER_MRE_LEN=300 pixi run --manifest-path dependencies/cnn/pixi.toml python3 src/cnn/predict_cnn.py \
+    --checkpoint cnn_checkpoints/cnn_mre300.pt --input pairs.tsv -o predictions.tsv \
+    --mre-col gene300 --mirna-col noncodingRNA
+```
+
+The input MRE must already be the full window (e.g. 300 nt, centred on the 50-nt site as in the
+table). `src/cnn/build_mre150.py` makes such tables from v7 tables with genome coordinates:
+
+```bash
+python3 src/cnn/build_mre150.py                                                   # 150 nt -> data/mre150, column gene150
+python3 src/cnn/build_mre150.py --up 50  --down 125 --col gene225 --out data/mre225
+python3 src/cnn/build_mre150.py --up 125 --down 125 --col gene300 --out data/mre300
+```
+
+It fetches the flanks from the GRCh38 primary assembly, checks each window's centre against
+`gene`, and writes N where a row has no coordinates, its centre does not match, or the window runs
+past a chromosome end. It keeps the 50-nt `gene` column and splits the Manakov train set by
+chromosome (chr2 = validation; the test set is chr1). Point it at your own files with
+`--genome GRCh38.fa` (samtools-indexed, Ensembl chromosome names), `--src-dir` (miRBench v7 tables) and
+`--novel-dir`. `--set NAME=PATH` adds any other v7 table, and `--only NAME …` builds a subset:
+
+```bash
+python3 src/cnn/build_mre150.py --genome GRCh38.fa --up 125 --down 125 --col gene300 \
+    --set mysites=my_v7.tsv --only mysites --out data/mine
+```
+
+All three were trained with the same rows and recipe as a matched 50-nt retrain (the shipped
+architecture with EMA; Manakov train minus chr2, validation on chr2, 30 epochs, patience 6):
+
+```bash
+export MRESEEKER_MRE_LEN=300          # 150 / 225 / 300
+D=data/mre300; COL=gene300
+python3 src/training/cnn/cnn_branches_mirbind.py train \
+    --train $D/manakov_train_nochr2.tsv --val $D/manakov_val_chr2.tsv \
+    --mre-col $COL --mirna-col noncodingRNA --family-col noncodingRNA_fam \
+    --epochs 30 --patience 6 --batch-size 256 --lr 1e-3 \
+    --seq-pairing embed --pair-embed-dim 16 --seq-pool gem --seq-filters 64 --seq-dim 128 \
+    --n-conv-blocks 6 --n-pool-blocks 4 --block-pool max --ema \
+    --out $D/cnn_mre300.pt
+```
+
+Test auPRC (every row scored, no de-duplication; the 50-nt column is the matched retrain, not the shipped
+checkpoint):
+
+| set | 50 nt | 150 nt | 225 nt | 300 nt |
+|---|---|---|---|---|
+| Manakov 2022 test (chr1) | 0.879 | 0.912 | 0.916 | 0.916 |
+| Manakov 2022 left-out miRNAs | 0.877 | 0.909 | 0.910 | 0.910 |
+| SAEC (GSE304955) | 0.812 | 0.822 | 0.824 | 0.824 |
+| SUM159PT (GSE263552) | 0.767 | 0.791 | 0.795 | 0.795 |
+| HSPC (GSE180129) | 0.849 | 0.866 | 0.872 | 0.873 |
+| Kasumi-1 (GSE180129) | 0.800 | 0.819 | 0.825 | 0.827 |
+
+The flank brings most of the gain at 150 nt. 300 nt adds a further 0.002–0.008, which comes
+mostly from rows whose seed match lies 51–125 nt from the core. On the two small CLASH sets
+(Hejret 2023, Klimentova 2022, ~1,000 rows each) the windows are within noise of each other.
+
 ---
 
 ## Repository layout
