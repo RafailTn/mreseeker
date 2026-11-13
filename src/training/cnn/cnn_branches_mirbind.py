@@ -2017,6 +2017,7 @@ def _train_one_run(
                 torch.save({
                     "model_state":  sel_state,
                     "model_args":   model_args,
+                    "mre_len":      MRE_LEN,
                     "val_metrics":  None,
                     "epoch":        epoch,
                     "weights":      sel_variant,
@@ -2085,6 +2086,7 @@ def _train_one_run(
             torch.save({
                 "model_state":  sel_state,
                 "model_args":   model_args,
+                "mre_len":      MRE_LEN,
                 "val_metrics":  sel_metrics,
                 "epoch":        epoch,
                 "weights":      sel_variant,
@@ -2462,6 +2464,15 @@ def _load_ckpt_model(checkpoint: str | Path,
     can be applied to any input independently.
     """
     ckpt  = torch.load(checkpoint, map_location=device, weights_only=False)
+    # The MRE window length is a module constant (MRESEEKER_MRE_LEN), and the network pools
+    # adaptively, so a mismatch would load and score silently wrong (sequences are cut / padded
+    # to MRE_LEN). Checkpoints saved since mre_len was recorded are checked; older ones carry no
+    # length and load unchecked.
+    ck_len = ckpt.get("mre_len")
+    if ck_len is not None and int(ck_len) != MRE_LEN:
+        raise ValueError(
+            f"{checkpoint} was trained with MRE window length {ck_len} nt, but MRE_LEN is "
+            f"{MRE_LEN}. Set MRESEEKER_MRE_LEN={ck_len} before running.")
     margs = dict(ckpt["model_args"])
     # backward-compat defaults: checkpoints predating these features used a
     # single WC(+wobble) channel with average pooling, so default to that when

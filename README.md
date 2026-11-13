@@ -125,10 +125,12 @@ flank on each side (mRNA sense), so they can use sites and context just outside 
 | `cnn_checkpoints/cnn_mre225.pt` | 225 nt | 50 / 125 | `gene225` | `225` |
 | `cnn_checkpoints/cnn_mre300.pt` | 300 nt | 125 / 125 | `gene300` | `300` |
 
-**The window length is not stored in the checkpoint.** Set `MRESEEKER_MRE_LEN` to the value above for
-both training and prediction. The network pools adaptively, so a wrong value still loads and
-runs without an error, but the MRE is padded or truncated and the scores are wrong. Unset, it defaults to 50,
-the shipped model.
+**Set `MRESEEKER_MRE_LEN` to the value above** for both training and prediction (unset, it defaults
+to 50, the shipped model). The window length is read when the code is imported, not taken from the
+checkpoint. Each checkpoint records the length it was trained with (`mre_len`), and loading it under a
+different `MRESEEKER_MRE_LEN` stops with an error naming the right value. The network pools adaptively, so
+without that check a mismatch would run and score padded or truncated MREs. Checkpoints saved
+before `mre_len` was recorded (including the shipped 50-nt one) load without the check.
 
 ```bash
 MRESEEKER_MRE_LEN=300 pixi run --manifest-path dependencies/cnn/pixi.toml python3 src/cnn/predict_cnn.py \
