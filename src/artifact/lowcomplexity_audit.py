@@ -206,6 +206,7 @@ def have_arm_preds():
 
 
 def main():
+    os.makedirs(f"{ROOT}/results", exist_ok=True)   # gitignored, absent in a fresh clone
     tabs = [load(s) for s in SETS]
     t = pd.concat(tabs, ignore_index=True)
     names = t.groupby("seq").agg(name=("noncodingRNA_name", lambda x: "|".join(sorted(set(map(str, x))))[:60]),

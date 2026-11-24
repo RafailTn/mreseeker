@@ -34,6 +34,7 @@ MIX = f"{HYB_DIR}/data/mixing_artifacts"
 EW = f"{ROOT}/data/relabel/noise/eval_win_v2"
 OUT = f"{ROOT}/data/seedless/readouts"
 RES = f"{ROOT}/results"
+os.makedirs(RES, exist_ok=True)   # results/ is gitignored, so a fresh clone lacks it
 BINS = [0, 0.1, 0.3, 0.5, 0.8, 1.0001]
 BLAB = ["<0.1", "0.1-0.3", "0.3-0.5", "0.5-0.8", ">=0.8"]
 

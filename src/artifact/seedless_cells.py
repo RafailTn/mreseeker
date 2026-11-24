@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from artifact_common import ROOT  # noqa: E402
 
 RES = f"{ROOT}/results"
+os.makedirs(RES, exist_ok=True)   # results/ is gitignored, so a fresh clone lacks it
 BINS = [0, 0.1, 0.3, 0.5, 0.8, 1.0001]
 BLAB = ["<0.1", "0.1-0.3", "0.3-0.5", "0.5-0.8", ">=0.8"]
 PARTIAL = ["seed_GU", "seed7_1mm", "seed_bulge", "3p_6mer", "contig8"]
