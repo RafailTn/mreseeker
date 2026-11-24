@@ -31,6 +31,24 @@ positives that survive. The weights are then rebalanced to A0's per-family and p
 | `train_arms.sh` | trains 150-nt arms with those weights and scores them (GPU, ~4.5 h per arm and seed) |
 | `check_expected.py` | compares a rerun with `expected/` |
 
+## Without the raw data
+
+`fetch_data.sh` puts every input in place from public sources and one Zenodo bundle (10.5281/zenodo.24503913; `BUNDLE_README.md` lists it):
+the miRBench v7 tables (Zenodo 10.5281/zenodo.20540907), the Ensembl GRCh38 genome, and the processed HybriDetector
+outputs, GSE test sets and readout windows. Every file is md5-checked. `cnn_mre150.pt` is in git.
+
+```bash
+bash src/artifact/fetch_data.sh                         # needs curl, samtools; ~1.5 GB download
+export HYBRIDETECTOR_DIR=$PWD/data/external/hybridetector
+G=data/external/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa
+python3 src/cnn/build_mre150.py --src-dir data/mirbench_v7 --genome $G
+python3 src/cnn/build_mre150.py --src-dir data/mirbench_v7 --genome $G --up 125 --down 125 --col gene300 --out data/mre300
+```
+
+Then run the order below from step 1. The readout windows and their scores come with the bundle, so skip
+`eval_windows.py`; it needs the hg38+rn7 genome. `make_bundle.sh` is the maintainer side that builds the bundle; how to
+rebuild its contents from GEO is in `REPRODUCE_MRESEEKER.md` of https://github.com/RafailTn/Hybridetector_pipeline.
+
 ## Run order
 
 Run from the repo root.
@@ -46,7 +64,7 @@ M=data/mre150; EW=data/relabel/noise/eval_win_v2/150
 #    from the miRBench v7 tables; point --genome / --src-dir / --novel-dir at local copies if the defaults do not exist
 python3 src/cnn/build_mre150.py
 python3 src/cnn/build_mre150.py --up 125 --down 125 --col gene300 --out data/mre300
-#    base 150-nt model: cnn_checkpoints/cnn_mre150.pt (gitignored; share it, or train it with the main README recipe)
+#    base 150-nt model: cnn_checkpoints/cnn_mre150.pt (tracked; recipe in the main README)
 #    readout windows + their base150 scores
 $PY src/artifact/eval_windows.py build
 MRESEEKER_MRE_LEN=150 $PX python3 src/artifact/eval_windows.py predict
@@ -109,7 +127,7 @@ the older `data/mre150/pred_mre150_<set>.tsv` files differ by at most 3e-8.
 - Code (tracked): `src/cnn/build_mre150.py` (window tables, `extend`), `src/cnn/predict_cnn.py` and
   `src/training/cnn/cnn_branches_mirbind.py` (model, `--sample-weights`).
 - Data from the HybriDetector pipeline folder (see below).
-- `cnn_checkpoints/cnn_mre150.pt` (gitignored), IntaRNA (on PATH, or the repo's gluon Pixi env) and samtools.
+- `cnn_checkpoints/cnn_mre150.pt` (tracked), IntaRNA (on PATH, or the repo's gluon Pixi env) and samtools.
 - `src/cnn/build_mre150.py` (step 0) reads the miRBench v7 tables (default `../microCLIP2/data`, `--src-dir`) and a
   GRCh38 primary assembly (default the HybriDetector one below, `--genome`).
 
