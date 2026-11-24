@@ -28,6 +28,12 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 CNN_SRC = f"{ROOT}/src/cnn"                         # build_mre150.py (tracked)
 TRAIN_SRC = f"{ROOT}/src/training/cnn"              # cnn_branches_mirbind.py (tracked)
 HYB_DIR = os.environ.get("HYBRIDETECTOR_DIR", "/mnt/raid1/rafail/Hybridetector_pipeline")
+# GRCh38 primary assembly (Ensembl names, .fai next to it): GRCH38_FA, else the fetch_data.sh copy, else HybriDetector's
+GENOME = os.environ.get("GRCH38_FA") or next(
+    (f for f in (f"{ROOT}/data/external/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa",
+                 f"{HYB_DIR}/external/HybriDetector/DBs/Homo_sapiens.GRCh38.dna.primary_assembly.fa")
+     if os.path.exists(f + ".fai")),
+    f"{HYB_DIR}/external/HybriDetector/DBs/Homo_sapiens.GRCh38.dna.primary_assembly.fa")
 INTARNA = shutil.which("IntaRNA") or f"{ROOT}/dependencies/gluon/.pixi/envs/default/bin/IntaRNA"
 
 RCT = str.maketrans("ACGTN", "TGCAN")

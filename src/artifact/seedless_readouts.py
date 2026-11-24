@@ -27,7 +27,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from seedless_strata import classify, ROOT  # noqa: E402
-from artifact_common import CNN_SRC, HYB_DIR, mixing_estimate  # noqa: E402
+from artifact_common import CNN_SRC, GENOME, HYB_DIR, mixing_estimate  # noqa: E402
 
 VO = f"{HYB_DIR}/data/validate_overexpression"
 MIX = f"{HYB_DIR}/data/mixing_artifacts"
@@ -80,7 +80,10 @@ def matched_resp(xv, xcnd, ev, ecnd, sign, stat):
 # ── Expt8 build ─────────────────────────────────────────────────────────────
 def build():
     sys.path.insert(0, CNN_SRC)
-    from build_mre150 import extend  # noqa: E402
+    import build_mre150  # noqa: E402
+    build_mre150.FA = GENOME   # its default is this machine's HybriDetector copy
+    extend = build_mre150.extend
+    print(f"genome {GENOME}", flush=True)
     o = pd.read_csv(f"{VO}/occupancy.tsv", sep="\t")
     s = pd.read_csv(f"{VO}/sites.tsv", sep="\t")
     s = s.drop_duplicates(["site_id", "which", "rep"]).rename(columns={"rep": "defined_in"})

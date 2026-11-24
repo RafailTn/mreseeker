@@ -130,6 +130,9 @@ the older `data/mre150/pred_mre150_<set>.tsv` files differ by at most 3e-8.
 - `cnn_checkpoints/cnn_mre150.pt` (tracked), IntaRNA (on PATH, or the repo's gluon Pixi env) and samtools.
 - `src/cnn/build_mre150.py` (step 0) reads the miRBench v7 tables (default `../microCLIP2/data`, `--src-dir`) and a
   GRCh38 primary assembly (default the HybriDetector one below, `--genome`).
+  `seedless_readouts.py build` uses the same genome: `$GRCH38_FA` if set, else the `fetch_data.sh` copy in
+  `data/external/genome/`, else the HybriDetector one.
+- `results/` is gitignored; the scripts create it.
 
 ### Data from HybriDetector
 
