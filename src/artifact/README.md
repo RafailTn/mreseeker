@@ -108,10 +108,33 @@ the older `data/mre150/pred_mre150_<set>.tsv` files differ by at most 3e-8.
 
 - Code (tracked): `src/cnn/build_mre150.py` (window tables, `extend`), `src/cnn/predict_cnn.py` and
   `src/training/cnn/cnn_branches_mirbind.py` (model, `--sample-weights`).
-- Data (not code), read from `$HYBRIDETECTOR_DIR` (default `/mnt/raid1/rafail/Hybridetector_pipeline`): HybriDetector
-  chimera reads and genome FASTAs (hg38, hg38+rn, indexed), small-RNA CPM, Expt8 (`validate_overexpression`) and the
-  mixing tables (`mixing_artifacts`).
+- Data from the HybriDetector pipeline folder (see below).
 - `cnn_checkpoints/cnn_mre150.pt` (gitignored), IntaRNA (on PATH, or the repo's gluon Pixi env) and samtools.
+- `src/cnn/build_mre150.py` (step 0) reads the miRBench v7 tables (default `../microCLIP2/data`, `--src-dir`) and a
+  GRCh38 primary assembly (default the HybriDetector one below, `--genome`).
+
+### Data from HybriDetector
+
+Read from `$HYBRIDETECTOR_DIR` (default `/mnt/raid1/rafail/Hybridetector_pipeline`); paths below are relative to it.
+Data only, no code is imported.
+
+| path | size | read by | used for |
+|---|---|---|---|
+| `external/HybriDetector/hyb_pairs/<sample>.hyb_pairs_deduplicated.tsv` and `<sample>.all_hyb_pairs.tsv`, 10 samples: Expt1/4/9 293T ChimeCLIP, with and without gel (`SAMPLES` in `artifact_common.py`) | 3.6 GB | `seedless_geometry.py` | ligation-geometry check |
+| `data/validate_overexpression/sites.tsv`, `occupancy.tsv` | 34 MB | `eval_windows.py`, `seedless_readouts.py` | Expt8 miR-1/miR-124 occupancy readout |
+| `data/mixing_artifacts/chimeras.tsv` | 160 MB | `eval_windows.py`, `seedless_readouts.py` | human/rat mixing readout |
+| `data/mixing_artifacts/artifact_rate.tsv` | 72 KB | `seedless_readouts.py` | per-block rates for the mixing estimate |
+| `data/smallrna/gse196460_mirna_cpm.tsv` | 68 KB | `seedless_pairing_null.py` | expressed decoy miRNAs for the pairing null |
+| `external/HybriDetector/DBs/Homo_sapiens.GRCh38.dna.primary_assembly.fa` (+ `.fai`) | 3.2 GB | `eval_windows.py`, `build_mre150.py` | occupancy windows, window tables |
+| `external/HybriDetector_hsrn/DBs/genome_hsrn.fa` (+ `.fai`) | 5.8 GB | `eval_windows.py` | mixing windows (human + rat genome) |
+
+The default removal (`seedless_arms.py build A2X_hi025`) needs none of these. They are needed to re-derive the cell
+labels (steps 0 and 3) and for the Expt8 / mixing readouts.
+
+Outside this machine: the hyb_pairs files are standard HybriDetector output and the genomes are public. The two
+`validate_overexpression` tables, the two `mixing_artifacts` tables and the small-RNA CPM table (about 200 MB) are
+made by the HybriDetector pipeline (`validate_overexpression.py`, `mixing_artifacts.py`). They are not in this repo:
+share them, or the scripts that make them, alongside it.
 
 `src/cnn/<name>.py` stubs load these scripts so older analyses and `data/*.sh` queues keep working; only this folder
 needs to be pushed.
