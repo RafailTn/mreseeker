@@ -81,10 +81,15 @@ def plot_row(n: int, row: pd.Series, z, out: Path) -> None:
     ax.plot(jj, ii, "-", color="black", lw=1.0)
     ax.scatter(jj, ii, s=14, c=[_KIND_COLOUR[int(k)] for k in kd[ii]],
                edgecolors="black", linewidths=0.6, zorder=3)
-    ax.set_xticks(range(L)); ax.set_xticklabels([_NT[c] for c in ti[:L]], fontsize=6)
+    if L <= 60:                      # 50-nt MRE: one nucleotide label per column
+        ax.set_xticks(range(L)); ax.set_xticklabels([_NT[c] for c in ti[:L]], fontsize=6)
+        ax.set_xlabel("MRE 5′→3′")
+    else:                            # wider windows (MRESEEKER_MRE_LEN 150-300): position every 10 nt
+        ax.set_xticks(range(0, L, 10)); ax.set_xticklabels(range(1, L + 1, 10), fontsize=6)
+        ax.set_xlabel("MRE position 5′→3′ (nt)")
     ax.set_yticks(range(m))
     ax.set_yticklabels([f"{_NT[c]}{i + 1}" for i, c in enumerate(mi[:m])], fontsize=6)
-    ax.set_xlabel("MRE 5′→3′"); ax.set_ylabel("miRNA 5′→3′")
+    ax.set_ylabel("miRNA 5′→3′")
     fig.colorbar(im, ax=ax, pad=0.01, label="IG attribution (logit)")
 
     cols = _duplex_columns(mi, ti, mj, kd, tb)

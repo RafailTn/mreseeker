@@ -39,7 +39,7 @@ except ImportError:
     from cnn import binding_types as _bt
 
 MAX_MIRNA = 30
-MRE_LEN   = 50
+MRE_LEN   = 50   # documentation only: the decoder takes the MRE length from its input arrays
 
 KIND_NONE, KIND_WC, KIND_GU, KIND_MM, KIND_BULGE = 0, 1, 2, 3, 4
 KIND_NAMES = {KIND_NONE: "-", KIND_WC: "WC", KIND_GU: "GU",

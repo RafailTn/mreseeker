@@ -44,7 +44,9 @@ for _a, _b in [("G", "U"), ("U", "G")]:
     _GU[_NUC[_a], _NUC[_b]] = 1.0
 
 _MAX_MI = 30
-_MAX_TI = 50
+_MAX_TI = 50     # string API (classify_binding_type) tokenises the MRE to this length; the index API
+                 # (classify_binding_type_idx / classify_index_arrays) takes whatever length it is given,
+                 # so it also works for the wider-window models (MRESEEKER_MRE_LEN = 150 / 225 / 300)
 
 
 def _tok(seq: str, length: int) -> np.ndarray:
@@ -69,21 +71,21 @@ def _max_consec(arr: np.ndarray) -> int:
 def _antidiag_features_idx(mi: np.ndarray, ti: np.ndarray) -> dict:
     """Best antiparallel register features from tokenised index arrays.
 
-    ``mi`` / ``ti`` are integer index arrays of length _MAX_MI / _MAX_TI
-    (A=0,C=1,G=2,U=3, pad/unknown=4).  Returns the richer per-position info the
+    ``mi`` / ``ti`` are integer index arrays (A=0,C=1,G=2,U=3, pad/unknown=4), normally of length
+    _MAX_MI / _MAX_TI; any MRE length works (the register search runs over the whole window).  Returns the richer per-position info the
     classification cascade needs.
     """
     mi = np.asarray(mi, dtype=np.intp)
     ti = np.asarray(ti, dtype=np.intp)
 
-    wc   = _WC[mi[:, None], ti[None, :]]          # (30, 50)
+    wc   = _WC[mi[:, None], ti[None, :]]          # (len(mi), len(ti)), normally (30, 50)
     gu   = _GU[mi[:, None], ti[None, :]]
     pair = wc + gu
 
-    P, Q   = np.indices((_MAX_MI, _MAX_TI))
+    P, Q   = np.indices(pair.shape)
     d_flat = (P + Q).ravel()
     pair_d = np.bincount(d_flat, weights=pair.ravel(),
-                         minlength=_MAX_MI + _MAX_TI - 1)
+                         minlength=sum(pair.shape) - 1)
     best = int(np.argmax(pair_d))
 
     mi_len = int((mi != 4).sum())
@@ -91,7 +93,7 @@ def _antidiag_features_idx(mi: np.ndarray, ti: np.ndarray) -> dict:
 
     p_wc = np.zeros(_MAX_MI, dtype=bool)
     p_gu = np.zeros(_MAX_MI, dtype=bool)
-    for i in range(min(mi_len, _MAX_MI)):
+    for i in range(min(mi_len, len(mi))):
         j = best - i
         if 0 <= j < ti_len and ti[j] != 4:
             p_wc[i] = bool(_WC[mi[i], ti[j]])

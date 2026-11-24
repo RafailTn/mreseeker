@@ -138,6 +138,11 @@ MRESEEKER_MRE_LEN=300 pixi run --manifest-path dependencies/cnn/pixi.toml python
     --mre-col gene300 --mirna-col noncodingRNA
 ```
 
+`explain --duplex` and `plot_duplex.py` work the same way with `MRESEEKER_MRE_LEN` set. The decoded
+duplex can lie anywhere in the window, including the flank. `seq_type` (the sequence-only comparison
+type) searches the whole window for its best-pairing register, and over 150–300 nt that is often a chance stretch. So
+trust `duplex_type` there, not `seq_type`.
+
 The input MRE must already be the full window (e.g. 300 nt, centred on the 50-nt site as in the
 table). `src/cnn/build_mre150.py` makes such tables from v7 tables with genome coordinates:
 

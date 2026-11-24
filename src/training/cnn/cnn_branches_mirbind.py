@@ -717,6 +717,8 @@ class MiRNAInteractionDataset(Dataset):
         self.mirna_cons = self.mirna_cons[mask]
         self.mre_cons   = self.mre_cons[mask]
         self.labels     = self.labels[mask]
+        if getattr(self, "targets", None) is not None:
+            self.targets = self.targets[mask]
 
     def __len__(self) -> int:
         return len(self.mirna_idx)
@@ -727,7 +729,8 @@ class MiRNAInteractionDataset(Dataset):
             torch.from_numpy(self.mre_idx[idx]),            # (MRE_LEN,)   int8
             torch.from_numpy(self.mirna_cons[idx]),         # (MAX_MIRNA,) float32
             torch.from_numpy(self.mre_cons[idx]),           # (MRE_LEN,)   float32
-            int(self.labels[idx]),
+            (float(self.targets[idx]) if getattr(self, "targets", None) is not None
+             else int(self.labels[idx])),
         )
         return item + (idx,) if self.return_index else item
 
@@ -1491,7 +1494,7 @@ def evaluate(model: MiRBindCNN, loader: DataLoader,
         all_labels.append(labels.cpu().numpy())
 
     logits_np = np.concatenate(all_logits)
-    labels_np = np.concatenate(all_labels).astype(int)
+    labels_np = (np.concatenate(all_labels) > 0).astype(int)
     metrics   = _binary_metrics(logits_np, labels_np)
     metrics["loss"] = total_loss / max(n_batches, 1)
     return metrics
@@ -1759,6 +1762,27 @@ def _train_sampler_weights(train_ds: "MiRNAInteractionDataset",
                            ) -> Optional[np.ndarray]:
     """Sampler weights for negative-binding-type undersampling, or None when the
     feature (``--undersample-neg-type``) is disabled."""
+    wfile = getattr(args, "sample_weights", None)
+    tfile = getattr(args, "soft_targets", None)
+    if wfile or tfile:
+        if getattr(args, "dedup", None) or getattr(args, "keep_binding_type", None) \
+                or getattr(args, "undersample_neg_type", None):
+            sys.exit("ERROR: --sample-weights/--soft-targets are row-aligned to --train and "
+                     "cannot be combined with --dedup, --keep-binding-type or --undersample-neg-type")
+        n = len(train_ds.labels)
+        if tfile:
+            t = np.load(tfile).astype(np.float32)
+            assert len(t) == n, f"--soft-targets has {len(t)} rows, train has {n}"
+            assert np.all((t > 0) == (train_ds.labels > 0)), "soft targets must be >0 exactly on positives"
+            train_ds.targets = t
+            print(f"  soft targets  : positives mean {t[train_ds.labels > 0].mean():.3f}")
+        if wfile:
+            w = np.load(wfile).astype(np.float64)
+            assert len(w) == n and np.all(w >= 0), f"--sample-weights has {len(w)} rows, train has {n}"
+            print(f"  sample weights: pos sum {w[train_ds.labels > 0].sum():.0f}, "
+                  f"neg sum {w[train_ds.labels == 0].sum():.0f}")
+            return w
+        return None
     tokens = getattr(args, "undersample_neg_type", None)
     if not tokens:
         return None
@@ -3071,6 +3095,12 @@ def main() -> int:
     tr.add_argument("--sce-beta", type=float, default=1.0, dest="sce_beta",
                     help="SCE weight on the reverse CE (RCE) term. Only used with --loss sce.")
     tr.add_argument("--balance",      action="store_true")
+    tr.add_argument("--sample-weights", default=None, dest="sample_weights", metavar="NPY",
+                    help="Per-row training-sampler weights (.npy, aligned to --train rows; "
+                         "WeightedRandomSampler with replacement = loss weighting in expectation).")
+    tr.add_argument("--soft-targets", default=None, dest="soft_targets", metavar="NPY",
+                    help="Per-row BCE targets (.npy, aligned to --train rows; 0 on negatives, "
+                         "(0,1] on positives), e.g. 1 - post-lysis artifact share.")
     tr.add_argument("--undersample-neg-type", nargs="+", default=None,
                     metavar="TYPE[:FACTOR]", dest="undersample_neg_type",
                     help="Under-represent negatives of these canonical binding "
