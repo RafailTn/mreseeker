@@ -21,7 +21,8 @@ compared with the same RNA's negatives, which in the twin design are other posit
 
 Step 3, impact: share of positives per set, base150 auPRC with and without the rows (both labels) of (a) the
 low-complexity self-enriched RNAs and (b) every self-enriched RNA, A1/A2/A3 - A0 auPRC with and without (3 seeds),
-and the mixing readout (rows, cross-species share, arm mixing gains without them). Row level: share of positives vs
+and the mixing readout (rows, cross-species share, arm mixing gains without them). The arm columns need the trained
+A0-A3 arms (train_arms.sh) and are left out when their predictions are missing. Row level: share of positives vs
 negatives whose window holds >= 12 nt of their small RNA on the same strand.
 
     python3 src/artifact/lowcomplexity_audit.py
@@ -198,6 +199,12 @@ def classify(r):
     return "anti" if a else "none"
 
 
+def have_arm_preds():
+    """True when every A0-A3 seed has its test-set and mixing predictions (step 3's arm columns)."""
+    return all(os.path.exists(f"{ROOT}/data/seedless/arms/{a}/{k}/pred_{s}.npy")
+               for a in ["A0", "A1", "A2", "A3"] for k in SEEDS for s in EVAL + ["mixing"])
+
+
 def main():
     tabs = [load(s) for s in SETS]
     t = pd.concat(tabs, ignore_index=True)
@@ -252,6 +259,10 @@ def main():
     bs = pd.DataFrame(rows)
     bs.to_csv(f"{ROOT}/results/lowcomplexity_by_set.tsv", sep="\t", index=False, float_format="%.4f")
 
+    arms = have_arm_preds()
+    if not arms:
+        print("\nA0-A3 arm predictions (data/seedless/arms/A*/s*/pred_*.npy) not found: impact table without the "
+              "arm columns (train them with src/artifact/train_arms.sh to add them)", flush=True)
     imp = []
     for s in SETS:
         x = t[t.set == s]
@@ -265,7 +276,7 @@ def main():
         for e, drop in excl.items():
             r[f"{e}_pos_share"] = (drop & (y == 1)).sum() / (y == 1).sum()
             r[f"base150_ap_no_{e}"] = ap(y[~drop], p[~drop])
-        if s in EVAL:
+        if arms and s in EVAL:
             for arm in ["A1", "A2", "A3"]:
                 for v, keep in {"all": np.ones(len(y), bool), "no_art": ~excl["art"], "no_allself": ~excl["allself"],
                                 "no_self12pos": ~excl["self12pos"]}.items():
@@ -280,7 +291,7 @@ def main():
     mexcl = {"art": m.seq.isin(art).values, "allself": m.seq.isin(allself).values}
     for e, drop in mexcl.items():
         r[f"{e}_pos_share"] = drop.mean()
-    for arm in ["A1", "A2", "A3"]:
+    for arm in (["A1", "A2", "A3"] if arms else []):
         for v, keep in {"all": np.ones(len(m), bool), "no_art": ~mexcl["art"], "no_allself": ~mexcl["allself"]}.items():
             d = []
             for k in SEEDS:
