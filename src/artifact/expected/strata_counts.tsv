@@ -1,0 +1,180 @@
+set	label	stratum	sub	n	n_comp3p
+gse180129_HSPC	0	core		5844	0
+gse180129_HSPC	0	flank150		11083	0
+gse180129_HSPC	0	flank300		14975	0
+gse180129_HSPC	0	noseed300	3p_6mer	1973	0
+gse180129_HSPC	0	noseed300	contig8	610	0
+gse180129_HSPC	0	noseed300	none	168718	0
+gse180129_HSPC	0	noseed300	seed7_1mm	7086	228
+gse180129_HSPC	0	noseed300	seed_GU	12365	340
+gse180129_HSPC	0	noseed300	seed_bulge	1028	34
+gse180129_HSPC	1	core		77864	0
+gse180129_HSPC	1	flank150		22615	0
+gse180129_HSPC	1	flank300		14987	0
+gse180129_HSPC	1	noseed300	3p_6mer	3160	0
+gse180129_HSPC	1	noseed300	contig8	1064	0
+gse180129_HSPC	1	noseed300	none	74472	0
+gse180129_HSPC	1	noseed300	seed7_1mm	10473	951
+gse180129_HSPC	1	noseed300	seed_GU	17037	1596
+gse180129_HSPC	1	noseed300	seed_bulge	2010	182
+gse180129_Kasumi1	0	core		4016	0
+gse180129_Kasumi1	0	flank150		7893	0
+gse180129_Kasumi1	0	flank300		10538	0
+gse180129_Kasumi1	0	noseed300	3p_6mer	1486	0
+gse180129_Kasumi1	0	noseed300	contig8	462	0
+gse180129_Kasumi1	0	noseed300	none	116272	0
+gse180129_Kasumi1	0	noseed300	seed7_1mm	4993	174
+gse180129_Kasumi1	0	noseed300	seed_GU	8532	243
+gse180129_Kasumi1	0	noseed300	seed_bulge	776	26
+gse180129_Kasumi1	1	core		40960	0
+gse180129_Kasumi1	1	flank150		16330	0
+gse180129_Kasumi1	1	flank300		12412	0
+gse180129_Kasumi1	1	noseed300	3p_6mer	2359	0
+gse180129_Kasumi1	1	noseed300	contig8	850	0
+gse180129_Kasumi1	1	noseed300	none	62748	0
+gse180129_Kasumi1	1	noseed300	seed7_1mm	7621	703
+gse180129_Kasumi1	1	noseed300	seed_GU	10356	902
+gse180129_Kasumi1	1	noseed300	seed_bulge	1332	100
+gse263552	0	core		3652	0
+gse263552	0	flank150		7577	0
+gse263552	0	flank300		9897	0
+gse263552	0	noseed300	3p_6mer	1327	0
+gse263552	0	noseed300	contig8	339	0
+gse263552	0	noseed300	none	101537	0
+gse263552	0	noseed300	seed7_1mm	4805	155
+gse263552	0	noseed300	seed_GU	6900	231
+gse263552	0	noseed300	seed_bulge	693	22
+gse263552	1	core		30911	0
+gse263552	1	flank150		14074	0
+gse263552	1	flank300		10678	0
+gse263552	1	noseed300	3p_6mer	1778	0
+gse263552	1	noseed300	contig8	483	0
+gse263552	1	noseed300	none	62157	0
+gse263552	1	noseed300	seed7_1mm	6839	492
+gse263552	1	noseed300	seed_GU	8518	572
+gse263552	1	noseed300	seed_bulge	1289	83
+gse304955	0	core		2494	0
+gse304955	0	flank150		5407	0
+gse304955	0	flank300		7330	0
+gse304955	0	noseed300	3p_6mer	944	0
+gse304955	0	noseed300	contig8	244	0
+gse304955	0	noseed300	none	79806	0
+gse304955	0	noseed300	seed7_1mm	3655	103
+gse304955	0	noseed300	seed_GU	4472	138
+gse304955	0	noseed300	seed_bulge	492	10
+gse304955	1	core		27934	0
+gse304955	1	flank150		7821	0
+gse304955	1	flank300		7397	0
+gse304955	1	noseed300	3p_6mer	1678	0
+gse304955	1	noseed300	contig8	498	0
+gse304955	1	noseed300	none	46451	0
+gse304955	1	noseed300	seed7_1mm	5919	490
+gse304955	1	noseed300	seed_GU	6145	486
+gse304955	1	noseed300	seed_bulge	1001	71
+hejret_test	0	core		10	0
+hejret_test	0	flank150		17	0
+hejret_test	0	flank300		33	0
+hejret_test	0	noseed300	3p_6mer	5	0
+hejret_test	0	noseed300	contig8	1	0
+hejret_test	0	noseed300	none	405	0
+hejret_test	0	noseed300	seed7_1mm	20	0
+hejret_test	0	noseed300	seed_GU	30	2
+hejret_test	0	noseed300	seed_bulge	2	0
+hejret_test	1	core		146	0
+hejret_test	1	flank150		31	0
+hejret_test	1	flank300		18	0
+hejret_test	1	noseed300	3p_6mer	18	0
+hejret_test	1	noseed300	contig8	17	0
+hejret_test	1	noseed300	none	167	0
+hejret_test	1	noseed300	seed7_1mm	35	4
+hejret_test	1	noseed300	seed_GU	58	9
+hejret_test	1	noseed300	seed_bulge	5	0
+klimentova_test	0	core		19	0
+klimentova_test	0	flank150		18	0
+klimentova_test	0	flank300		39	0
+klimentova_test	0	noseed300	3p_6mer	6	0
+klimentova_test	0	noseed300	contig8	1	0
+klimentova_test	0	noseed300	none	365	0
+klimentova_test	0	noseed300	seed7_1mm	8	0
+klimentova_test	0	noseed300	seed_GU	21	2
+klimentova_test	1	core		197	0
+klimentova_test	1	flank150		46	0
+klimentova_test	1	flank300		16	0
+klimentova_test	1	noseed300	3p_6mer	7	0
+klimentova_test	1	noseed300	contig8	4	0
+klimentova_test	1	noseed300	none	162	0
+klimentova_test	1	noseed300	seed7_1mm	21	4
+klimentova_test	1	noseed300	seed_GU	19	2
+klimentova_test	1	noseed300	seed_bulge	5	1
+manakov_leftout	0	core		234	0
+manakov_leftout	0	flank150		475	0
+manakov_leftout	0	flank300		640	0
+manakov_leftout	0	noseed300	3p_6mer	96	0
+manakov_leftout	0	noseed300	contig8	33	0
+manakov_leftout	0	noseed300	none	7837	0
+manakov_leftout	0	noseed300	seed7_1mm	289	14
+manakov_leftout	0	noseed300	seed_GU	383	19
+manakov_leftout	0	noseed300	seed_bulge	40	0
+manakov_leftout	1	core		4585	0
+manakov_leftout	1	flank150		1207	0
+manakov_leftout	1	flank300		396	0
+manakov_leftout	1	noseed300	3p_6mer	133	0
+manakov_leftout	1	noseed300	contig8	28	0
+manakov_leftout	1	noseed300	none	2734	0
+manakov_leftout	1	noseed300	seed7_1mm	413	48
+manakov_leftout	1	noseed300	seed_GU	465	64
+manakov_leftout	1	noseed300	seed_bulge	66	3
+manakov_test	0	core		3989	0
+manakov_test	0	flank150		8161	0
+manakov_test	0	flank300		11441	0
+manakov_test	0	noseed300	3p_6mer	1264	0
+manakov_test	0	noseed300	contig8	361	0
+manakov_test	0	noseed300	none	118271	0
+manakov_test	0	noseed300	seed7_1mm	5120	144
+manakov_test	0	noseed300	seed_GU	8034	247
+manakov_test	0	noseed300	seed_bulge	631	10
+manakov_test	1	core		69141	0
+manakov_test	1	flank150		23169	0
+manakov_test	1	flank300		9507	0
+manakov_test	1	noseed300	3p_6mer	2202	0
+manakov_test	1	noseed300	contig8	600	0
+manakov_test	1	noseed300	none	45215	0
+manakov_test	1	noseed300	seed7_1mm	6948	688
+manakov_test	1	noseed300	seed_GU	8835	849
+manakov_test	1	noseed300	seed_bulge	1282	108
+manakov_train_nochr2	0	core		30208	0
+manakov_train_nochr2	0	flank150		61785	0
+manakov_train_nochr2	0	flank300		83623	0
+manakov_train_nochr2	0	noseed300	3p_6mer	9194	0
+manakov_train_nochr2	0	noseed300	contig8	2848	0
+manakov_train_nochr2	0	noseed300	none	860411	0
+manakov_train_nochr2	0	noseed300	seed7_1mm	37362	1064
+manakov_train_nochr2	0	noseed300	seed_GU	60266	1679
+manakov_train_nochr2	0	noseed300	seed_bulge	4674	134
+manakov_train_nochr2	1	core		474663	0
+manakov_train_nochr2	1	flank150		160636	0
+manakov_train_nochr2	1	flank300		62617	0
+manakov_train_nochr2	1	noseed300	3p_6mer	14507	0
+manakov_train_nochr2	1	noseed300	contig8	4289	0
+manakov_train_nochr2	1	noseed300	none	309603	0
+manakov_train_nochr2	1	noseed300	seed7_1mm	46846	4554
+manakov_train_nochr2	1	noseed300	seed_GU	63481	6538
+manakov_train_nochr2	1	noseed300	seed_bulge	8453	654
+manakov_val_chr2	0	core		2835	0
+manakov_val_chr2	0	flank150		5546	0
+manakov_val_chr2	0	flank300		7412	0
+manakov_val_chr2	0	noseed300	3p_6mer	877	0
+manakov_val_chr2	0	noseed300	contig8	271	0
+manakov_val_chr2	0	noseed300	none	75864	0
+manakov_val_chr2	0	noseed300	seed7_1mm	3433	124
+manakov_val_chr2	0	noseed300	seed_GU	5556	144
+manakov_val_chr2	0	noseed300	seed_bulge	416	16
+manakov_val_chr2	1	core		42929	0
+manakov_val_chr2	1	flank150		13926	0
+manakov_val_chr2	1	flank300		5185	0
+manakov_val_chr2	1	noseed300	3p_6mer	1154	0
+manakov_val_chr2	1	noseed300	contig8	391	0
+manakov_val_chr2	1	noseed300	none	24621	0
+manakov_val_chr2	1	noseed300	seed7_1mm	3874	364
+manakov_val_chr2	1	noseed300	seed_GU	5108	549
+manakov_val_chr2	1	noseed300	seed_bulge	671	62
