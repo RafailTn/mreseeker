@@ -45,7 +45,9 @@ def reads():
                                                                      "Nunique", "sample"]]
     os.makedirs(OUT, exist_ok=True)
     d.to_csv(f, sep="\t", index=False)
-    return d
+    # read back: the hyb_pairs tables already hold a "fam" column, so d has two; the cached path renames the second
+    # to "fam.1", and a fresh run must see the same frame
+    return pd.read_csv(f, sep="\t", dtype={"chr": str})
 
 
 def name_to_family():

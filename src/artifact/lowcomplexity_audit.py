@@ -122,8 +122,11 @@ def scores(name, n):
         assert len(o) == n and (o.row.values == np.arange(n)).all()
         return o.interaction_probability.to_numpy(float)
     f = f"{ROOT}/data/seedless/strata/{name}.tsv.gz"
+    fn = f"{ROOT}/data/seedless/base150/pred_{name}.npy"     # seedless_predict.py (README step 1)
     if os.path.exists(f):
         p = pd.read_csv(f, sep="\t", usecols=lambda c: c == "p150").p150.to_numpy(float)
+    elif os.path.exists(fn):
+        p = np.load(fn).astype(float)
     else:
         p = pd.read_csv(f"{ROOT}/data/mre150/pred_mre150_{name}.tsv", sep="\t",
                         usecols=["interaction_probability"]).interaction_probability.to_numpy(float)

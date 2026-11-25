@@ -73,7 +73,7 @@ $PY src/artifact/seedless_readouts.py build               # Expt8 sites -> data/
 # 1. base150 scores of the test sets and readouts, then strata
 SPECS=""
 for s in manakov_test manakov_leftout gse304955 gse263552 gse180129_HSPC gse180129_Kasumi1 \
-         hejret_test klimentova_test manakov_val_chr2; do SPECS="$SPECS $s=$M/$s.tsv:gene150:noncodingRNA"; done
+         hejret_train hejret_test klimentova_test manakov_val_chr2; do SPECS="$SPECS $s=$M/$s.tsv:gene150:noncodingRNA"; done
 SPECS="$SPECS occupancy=$EW/occupancy.tsv:gene:noncodingRNA mixing=$EW/mixing.tsv:gene:noncodingRNA"
 SPECS="$SPECS expt8_all=data/seedless/readouts/expt8_sites150.tsv:gene150:mirna_seq"
 MRESEEKER_MRE_LEN=150 $PX python3 src/artifact/seedless_predict.py --checkpoint cnn_checkpoints/cnn_mre150.pt \
@@ -118,9 +118,15 @@ Without them it writes the flag tables and an impact table without the arm colum
 | `arm_diag.tsv` | step 4 | within ~0.01 (share of rows set to weight 0) |
 
 Training rows are binned on out-of-fold scores (step 2), and GPU training is not bit-reproducible, so the training
-rows near the 0.1 and 0.25 edges can switch cells. The arm weights therefore match closely, not exactly. Everything
-computed from the test sets is deterministic given `cnn_mre150.pt`: base150 scores from `seedless_predict.py` and from
-the older `data/mre150/pred_mre150_<set>.tsv` files differ by at most 3e-8.
+rows near the 0.1 and 0.25 edges can switch cells. The arm weights therefore match closely, not exactly. GPU inference
+is not bit-exact either: base150 scores of the test sets from a fresh run differ by up to ~3e-5, which leaves strata,
+cell labels and readouts unchanged.
+
+Tested 2026-11-25 from a clean checkout in a sandbox that hid the raw data (inputs from `fetch_data.sh` only): every
+part of `check_expected.py` passed (strata 0/179 cells differ, 28/28 flagged RNAs, 189/189 cell labels, counts and
+R values exact, readouts exact, `A2X_hi025` zero shares within 0.0011). The OOF scores of that run correlate 0.993
+with the study's. Run times on one GPU and 64 cores: steps 0-1 15 min, OOF 7.6 h alongside the pairing null 11.4 h,
+steps 3-4 15 min.
 
 ## What stays outside this folder
 
