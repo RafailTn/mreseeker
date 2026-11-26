@@ -38,6 +38,11 @@ DEEMPH_FILL = "#f0efec"
 BLUE_RAMP = ["#ffffff", "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5",
              "#256abf", "#184f95", "#0d366b"]
 
+# Full categorical palette, fixed order (slots 1-2 = the two accents above). Validated on the light surface
+# for adjacent pairs (bars, stacks, lines): worst CVD dE 9.1, worst normal-vision dE 19.6. Not for
+# all-pairs use (scatter) with all eight.
+CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+
 
 def apply(base: float = 11.0) -> None:
     """Install the poster rcParams. `base` is the body font size in points."""

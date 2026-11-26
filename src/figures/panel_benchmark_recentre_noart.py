@@ -51,7 +51,7 @@ SETS = {
     "gse180129_HSPC": "HSPC",
     "gse180129_Kasumi1": "Kasumi-1",
 }
-TONES = ps.BLUE_RAMP[1:] + ["#081f3d"]
+TONES = ps.CATEGORICAL  # one hue per test set, fixed order
 
 
 def measured() -> dict[str, tuple[float, ...]]:
@@ -103,7 +103,7 @@ def main() -> None:
         ax.bar(xs, [data[k][j] for k in order], width=bw * 0.92, color=tone, edgecolor="none", zorder=3, label=lab)
     for i, k in enumerate(order):
         if k == OURS:
-            ax.axvspan(i - 0.5, i + 0.5, color=ps.GLUON_FILL, zorder=1)
+            ax.axvspan(i - 0.5, i + 0.5, color=ps.FILL, zorder=1)
 
     ax.axhline(0.5, color=ps.MUTED, lw=1.0, ls=(0, (4, 3)), zorder=2)
     ax.text(1.015, 0.5, "chance", transform=ax.get_yaxis_transform(), ha="left", va="center", fontsize=8,
@@ -113,7 +113,7 @@ def main() -> None:
     for t, k in zip(ax.get_xticklabels(), order):
         if k == OURS:
             t.set_fontweight("bold")
-            t.set_color(ps.ACCENT_GLUON)
+            t.set_color(ps.INK)
     lo = min(min(v) for v in data.values())
     ax.set_ylim(min(0.45, lo - 0.02), 1.0)
     ax.set_ylabel("average precision")
