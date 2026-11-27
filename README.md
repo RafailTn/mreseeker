@@ -1,7 +1,7 @@
 # MREseeker (CNN)
 
 Predict whether a microRNA binds a candidate target site (MRE) on an mRNA, with a
-**sequence CNN** that reads the raw miRNA and MRE sequences (~0.87 average
+**sequence CNN** that reads the raw miRNA and MRE sequences (~0.91 average
 precision; chance = 0.5). No feature-extraction pass is needed, and `explain
 --duplex` reports which bases pair and what kind of site the model relied on.
 
