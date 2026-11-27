@@ -5,11 +5,17 @@ Predict whether a microRNA binds a candidate target site (MRE) on an mRNA, with 
 precision; chance = 0.5). No feature-extraction pass is needed, and `explain
 --duplex` reports which bases pair and what kind of site the model relied on.
 
-![Benchmark: average precision per model and test set](data/panel_benchmark_saec.png)
+![Benchmark: average precision per model and test set](data/panel_benchmark_recentre.png)
 
-Published miRBench predictors re-run over the same five sets. Redraw with
-`python3 src/figures/panel_benchmark_saec.py`, from `results/head_to_head.csv` and
-`results/mirbench_predictor_evaluation.csv` (the only tracked files under `results/`).
+The 50-nt CNN trained on re-centred windows (`cnn_checkpoints/cnn_mre50_recentre.pt`; no sample weights, no rows
+removed) against published miRBench predictors, on the four miRBench test sets and four new cell lines (SAEC,
+SUM159PT, HSPC, Kasumi-1). In every set, flank positives (no canonical site in the 50-nt window, one within the
+150-nt window) are re-centred on their seed; all other rows, every negative included, keep their original window.
+Because only positives move, window position carries a little label information, and all predictors see the same
+windows. One SAEC row whose window contains an N is left out for all predictors. Scores come from
+`src/figures/mirbench_recentre_eval.py`, run in an environment with the
+[miRBench package](https://github.com/katarinagresova/miRBench). The panel is redrawn with
+`python3 src/figures/panel_benchmark_recentre.py`, which writes `results/benchmark_recentre.csv`.
 
 `src/eqtl_analysis/` applies the CNN to GTEx eQTLs that fall in miRNA target sites.
 
