@@ -26,6 +26,7 @@ positives that survive. The weights are then rebalanced to A0's per-family and p
 | `seedless_geometry.py` | check: ligation geometry of the reads (R_geom, swap control) |
 | `seedless_readouts.py` | check: Expt8 overexpression response and human/rat mixing |
 | `seedless_cells.py` | check: combines the three into the cell labels (`results/seedless_cells.tsv`, `_fine.tsv`) |
+| `seedless_posctl.py` | positive control: pairing and geometry efficiency on seed-less Expt8 sites that respond to overexpression, and the real share of the ARTIFACT cell they imply |
 | `lowcomplexity_audit.py` | flags self-chimera and low-complexity small RNAs (`results/lowcomplexity_rnas.tsv`, `data/lowcomplexity/*.npz`) |
 | `seedless_arms.py` | builds the removal weights (`data/seedless/arms/<arm>.npy`) |
 | `train_arms.sh` | trains 150-nt arms with those weights and scores them (GPU, ~4.5 h per arm and seed) |
@@ -89,6 +90,9 @@ $PY src/artifact/seedless_pairing_null.py select && $PY src/artifact/seedless_pa
 $PY src/artifact/seedless_geometry.py
 $PY src/artifact/seedless_readouts.py occupancy && $PY src/artifact/seedless_readouts.py mixing
 $PY src/artifact/seedless_cells.py && $PY src/artifact/seedless_cells.py fine
+#    positive control (optional; geometry needs the Expt8 hyb_pairs, see below, else pairing only)
+$PY src/artifact/seedless_posctl.py sites && $PY src/artifact/seedless_posctl.py geometry && \
+    $PY src/artifact/seedless_posctl.py efficiency && $PY src/artifact/seedless_posctl.py cell 0.25
 
 # 4. RNA-side flags, then removal weights
 $PY src/artifact/lowcomplexity_audit.py
@@ -128,6 +132,24 @@ R values exact, readouts exact, `A2X_hi025` zero shares within 0.0011). The OOF 
 with the study's. Run times on one GPU and 64 cores: steps 0-1 15 min, OOF 7.6 h alongside the pairing null 11.4 h,
 steps 3-4 15 min.
 
+## Positive control
+
+`seedless_posctl.py` asks how often the pairing and geometry tests detect seed-less sites that are real. The control is the
+18,458 input-gated Expt8 miR-1 / miR-124 sites with no seed within 300 nt (already scored by the pairing null). Each site's
+response is its occupancy change under overexpression against endogenous sites of the same condition; the endogenous
+sites give the null. Sites above the null's 90th percentile are about 37% real, and each test's efficiency is its
+signal there minus the low responders', divided by that share. Study run (2026-11-27), `none` sites:
+
+| | efficiency [95% CI] | ARTIFACT cell (0.10-0.25) real share, chr1 / leftout / gse304955 |
+|---|---|---|
+| pairing (R_emp / s) | 0.55 [0.39, 0.73] | 0.06 [0.02, 0.13] / 0.07 [0.00, 0.24] / 0.05 [0.00, 0.12] |
+| geometry ((R_geom - swap) / s) | 0.24 [0.13, 0.36] | 0.25 / 0.22 / -, only if a null cell has R_geom - swap = 0 |
+
+The pairing efficiency matches `s_eff` (0.515) in `seedless_cells.py`. Geometry is weak and its zero point is not
+verified: low-responding Expt8 sites already reach R_geom - swap of about 0.09, so its real share is an upper bound.
+Caveats: two overexpressed miRNAs (most sites miR-124); the low responders still hold real sites, which biases both
+efficiencies low and the real shares high; the endogenous null fits the far tail imperfectly.
+
 ## What stays outside this folder
 
 - Code (tracked): `src/cnn/build_mre150.py` (window tables, `extend`), `src/cnn/predict_cnn.py` and
@@ -148,6 +170,7 @@ Data only, no code is imported.
 | path | size | read by | used for |
 |---|---|---|---|
 | `external/HybriDetector/hyb_pairs/<sample>.hyb_pairs_deduplicated.tsv` and `<sample>.all_hyb_pairs.tsv`, 10 samples: Expt1/4/9 293T ChimeCLIP, with and without gel (`SAMPLES` in `artifact_common.py`) | 3.6 GB | `seedless_geometry.py` | ligation-geometry check |
+| `external/HybriDetector/hyb_pairs/Expt8_293TmiR{1,124}oe_WithGelChimeCLIP_rep{1,2}.{hyb_pairs_deduplicated,all_hyb_pairs}.tsv`, 4 samples (not in the Zenodo bundle) | 0.8 GB | `seedless_posctl.py geometry` | geometry positive control |
 | `data/validate_overexpression/sites.tsv`, `occupancy.tsv` | 34 MB | `eval_windows.py`, `seedless_readouts.py` | Expt8 miR-1/miR-124 occupancy readout |
 | `data/mixing_artifacts/chimeras.tsv` | 160 MB | `eval_windows.py`, `seedless_readouts.py` | human/rat mixing readout |
 | `data/mixing_artifacts/artifact_rate.tsv` | 72 KB | `seedless_readouts.py` | per-block rates for the mixing estimate |
